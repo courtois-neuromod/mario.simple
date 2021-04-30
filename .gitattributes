@@ -6,3 +6,4 @@
 *.txt annex.largefiles=nothing
 *.tsv annex.largefiles=nothing
 *.state annex.largefiles=anything
+*.nes annex.largefiles=anything
