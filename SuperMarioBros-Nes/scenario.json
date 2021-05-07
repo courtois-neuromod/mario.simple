@@ -4,6 +4,10 @@
       "lives": {
         "op": "equal",
         "reference": -1
+      },
+      "stage": {
+        "measurement": "delta",
+        "op": "positive"
       }
     }
   },
