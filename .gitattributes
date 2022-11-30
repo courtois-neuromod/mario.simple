@@ -7,3 +7,4 @@
 *.tsv annex.largefiles=nothing
 *.state annex.largefiles=anything
 *.nes annex.largefiles=anything
+**/.git* annex.largefiles=nothing
