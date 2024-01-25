@@ -8,6 +8,74 @@
       "address": 1886,
       "type": "|u1"
     },
+    "jump_airborne": {
+      "address": 29,
+      "type": "<u1"
+    },
+    "walk_animation": {
+      "address": 1794,
+      "type": "|u1"
+    },
+    "moving_direction": {
+      "address": 69,
+      "type": "|u1"
+    },
+    "fireball_counter": {
+      "address": 1742,
+      "type": "|u1"
+    },
+    "player_sprite": {
+      "address": 1749,
+      "type": "|u1"
+    },
+    "star_timer": {
+      "address": 1951,
+      "type": "|u1"
+    },
+    "enemy_kill30": {
+      "address": 30,
+      "type": "|u1"
+    },
+    "enemy_kill31": {
+      "address": 31,
+      "type": "|u1"
+    },
+    "enemy_kill32": {
+      "address": 32,
+      "type": "|u1"
+    },
+    "enemy_kill33": {
+      "address": 33,
+      "type": "|u1"
+    },
+    "enemy_kill34": {
+      "address": 34,
+      "type": "|u1"
+    },
+    "enemy_kill35": {
+      "address": 35,
+      "type": "|u1"
+    },
+    "enemy_drawn15": {
+      "address": 15,
+      "type": "|u1"
+    },
+    "enemy_drawn16": {
+      "address": 16,
+      "type": "|u1"
+    },
+    "enemy_drawn17": {
+      "address": 17,
+      "type": "|u1"
+    },
+    "enemy_drawn18": {
+      "address": 18,
+      "type": "|u1"
+    },
+    "enemy_drawn19": {
+      "address": 19,
+      "type": "|u1"
+    },
     "levelHi": {
       "address": 1887,
       "type": "|i1"
@@ -19,6 +87,22 @@
     "lives": {
       "address": 1882,
       "type": "|i1"
+    },
+    "player_state": {
+      "address": 14,
+      "type": "|u1"
+    },
+    "powerstate": {
+      "address": 1878,
+      "type": ">d4"
+    },
+    "powerup_appear": {
+      "address": 57,
+      "type": "<u1"
+    },
+    "powerup_yes_no": {
+      "address": 27,
+      "type": "<u1"
     },
     "score": {
       "address": 2013,
