@@ -84,6 +84,14 @@
       "address": 14,
       "type": "|u1"
     },
+    "player_x_posHi": {
+      "address": 109,
+      "type": "|u1"
+    },
+    "player_x_posLo": {
+      "address": 134,
+      "type": "|u1"
+    },
     "powerstate": {
       "address": 1878,
       "type": ">d4"
@@ -95,10 +103,6 @@
     "powerup_yes_no": {
       "address": 27,
       "type": "<u1"
-    },
-    "player_x_position": {
-      "address": 86,
-      "type": "|u1"
     },
     "score": {
       "address": 2013,
