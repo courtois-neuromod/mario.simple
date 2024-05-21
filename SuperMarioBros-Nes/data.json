@@ -68,6 +68,10 @@
       "address": 1884,
       "type": "|i1"
     },
+    "level_layout": {
+      "address": 231,
+      "type": "|u1"
+    },
     "lives": {
       "address": 1882,
       "type": "|i1"
@@ -90,6 +94,10 @@
     },
     "player_x_posLo": {
       "address": 134,
+      "type": "|u1"
+    },
+    "player_y_pos": {
+      "address": 206,
       "type": "|u1"
     },
     "powerstate": {
