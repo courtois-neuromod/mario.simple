@@ -104,5 +104,7 @@ unzip -p recording.bk2 Core.bin > Core.bin
 python code/fix_state_palette.py Core.bin Core.fixed.bin
 ```
 
-(or call `fix_state_palette.fix()` on the bytes). The rewrite changes nothing
-but the 32 palette bytes; the run is RAM-identical afterwards.
+(or call `fix_state_palette.fix()` on the bytes). The tool locates the palette
+chunk of the fceumm state structurally, so it works whatever palette the state
+currently holds and can be re-run after a colour change. The rewrite changes
+nothing but the 32 palette bytes; the run is RAM-identical afterwards.

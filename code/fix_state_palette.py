@@ -1,59 +1,46 @@
 #!/usr/bin/env python3
 """Rewrite the PPU palette stored inside a savestate so it matches simplify_rom.py.
 
-Savestates (.state files, or Core.bin inside a .bk2) captured mid-level on the
-original ROM carry the original PPU palette; the game only rewrites palettes
-when a new area loads.  The 26 level states in this repo start on the black
-"WORLD x-y" screen and are fine, but mid-level states (Level5-x, Level6-x,
-scene-level states) would show original colours until the next area load.
+Savestates (.state files, or Core.bin inside a .bk2) carry the PPU palette of
+the moment they were captured, and the game only rewrites palettes when a new
+area loads.  A state saved on the "WORLD x-y" screen therefore shows that
+screen with the stored backdrop and Mario colours, and a state saved
+mid-level shows the whole level with the stored palette until the next area
+change.  This replaces the stored palette with the one simplify_rom.py
+installs, backdrop included, so that a run starts with the same colours it
+continues with.
 
-This finds the 32-byte palette block in the (gzip) state and replaces it with
-the palette simplify_rom.py installs, backdrop included (a state saved on the
-"WORLD x-y" screen holds the original black backdrop and Mario colours, which
-would otherwise make the first intermission of a run look different from the
-later ones).  Usage:
+The fceumm savestate stores the 32 palette bytes in a chunk keyed "PRAM"
+(4-byte key, 4-byte little-endian size 32, data), so the block is found
+structurally, whatever palette it currently holds.  Usage:
 
     fix_state_palette.py IN.state OUT.state
 """
-import gzip, sys, re, importlib.util, os
+import gzip, sys, importlib.util, os
 
 spec = importlib.util.spec_from_file_location("sr", os.path.join(os.path.dirname(os.path.abspath(__file__)), "simplify_rom.py"))
 sr = importlib.util.module_from_spec(spec); spec.loader.exec_module(sr)
 
-ORIG_SETS = [  # BG rows 0-3 then sprite rows 0-3 of the four area palette sets (index 0 of each row is a wildcard)
-    "0F 15 12 25 0F 3A 1A 0F 0F 30 12 0F 0F 27 12 0F 22 16 27 18 0F 10 30 27 0F 16 30 27 0F 0F 30 10",
-    "0F 29 1A 0F 0F 36 17 0F 0F 30 21 0F 0F 27 17 0F 0F 16 27 18 0F 1A 30 27 0F 16 30 27 0F 0F 36 17",
-    "0F 29 1A 09 0F 3C 1C 0F 0F 30 21 1C 0F 27 17 1C 0F 16 27 18 0F 1C 36 17 0F 16 30 27 0F 0C 3C 1C",
-    "0F 30 10 00 0F 30 10 00 0F 30 16 00 0F 27 17 00 0F 16 27 18 0F 1C 36 17 0F 16 30 27 0F 00 30 10",
-]
-def pattern(s):
-    b = bytes.fromhex(s.replace(" ", "")); out = b""
-    for i, x in enumerate(b):
-        wild = i % 4 == 0 or i < 4 or 12 <= i < 20 or (i % 4 == 3 and i < 16)
-        out += b"." if wild else re.escape(bytes([x]))
-    return out
-# Wildcards: every index-0 byte, BG row 0 (snow/mushroom variants rewrite it), BG index 3 and all of
-# BG row 3 (the palette-3 rotation), sprite row 0 (varies with Mario's state).  BG rows 1-2 and sprite
-# rows 1-3 identify the area palette set.
-PATS = [re.compile(pattern(s), re.S) for s in ORIG_SETS]
-NEW = bytes(sum(sr.BG_PAL, []) + sum(sr.SPR_PAL, []))
+NEW = bytearray(sum(sr.BG_PAL, []) + sum(sr.SPR_PAL, []))
+NEW[16:20] = bytes(sr.PLAYER_PAL[0])          # sprite palette 0 as the game writes it for Mario
+NEW = bytes(NEW)
+CHUNK = b"PRAM" + (32).to_bytes(4, "little")
 
 def fix(data: bytes):
-    n = 0
-    for pat in PATS:
-        for m in pat.finditer(data):
-            i = m.start(); block = bytearray(data[i:i+32])
-            for k in range(32):
-                block[k] = NEW[k]                  # index-0 bytes too: one backdrop everywhere (the stored one is black on the "WORLD x-y" screen)
-            block[17:20] = bytes(sr.PLAYER_PAL[0][1:])  # Mario row
-            data = data[:i] + bytes(block) + data[i+32:]; n += 1
+    """Return (data with every PRAM palette chunk rewritten, number of chunks)."""
+    n = 0; i = data.find(CHUNK)
+    while i >= 0:
+        j = i + len(CHUNK)
+        assert all(b < 0x40 for b in data[j:j+32]), "PRAM chunk does not look like a palette"
+        data = data[:j] + NEW + data[j+32:]; n += 1
+        i = data.find(CHUNK, j)
     return data, n
 
 if __name__ == "__main__":
     src, dst = sys.argv[1:3]
     raw = open(src, "rb").read()
     gz = raw[:2] == b"\x1f\x8b"
-    data = gzip.decompress(raw) if gz else raw
-    data, n = fix(data)
+    data, n = fix(gzip.decompress(raw) if gz else raw)
+    if n != 1: print(f"warning: {n} palette chunks found in {src}", file=sys.stderr)
     open(dst, "wb").write(gzip.compress(data) if gz else data)
-    print(f"{src}: {n} palette block(s) rewritten -> {dst}")
+    print(f"{src}: {n} palette chunk(s) rewritten -> {dst}")

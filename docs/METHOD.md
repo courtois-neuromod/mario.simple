@@ -319,8 +319,10 @@ recordings (79 of them the first repetition of a run) start in gameplay and
 keep the original colours on the simplified ROM until the next area change,
 which makes, for instance, Lakitu white and pipes green.
 `code/fix_state_palette.py` rewrites the 32 palette bytes inside a state or
-`Core.bin`; the run is RAM-identical afterwards, and applying it to every
-recording makes both cases consistent. The 26 level savestates of this
+`Core.bin` (it locates the fceumm `PRAM` chunk structurally, so it applies
+whatever palette is stored and can be re-run after a colour change); the run
+is RAM-identical afterwards, and applying it to every recording makes both
+cases consistent. The 26 level savestates of this
 repository have been rewritten this way (their game state is untouched; the
 600-frame scripted-play check of this section was repeated with them), so new
 recordings made on the simplified ROM start with the simplified palette. The
