@@ -1,0 +1,10 @@
+manuscript.aux
+manuscript.bbl
+manuscript.blg
+manuscript.fdb_latexmk
+manuscript.fls
+manuscript.log
+manuscript.out
+build.log
+page-*.png
+manuscript.pdf

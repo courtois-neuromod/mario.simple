@@ -1,0 +1,108 @@
+% =====================================================================
+% References for the mario.simple paper. Entries marked VERIFY need to be
+% checked before submission; entries marked TODO are placeholders for
+% literature still to be identified.
+% =====================================================================
+
+% --- CNeuroMod, datasets, apparatus ----------------------------------
+
+@article{paugam2025mario,
+  title   = {A large-scale longitudinal {fMRI} dataset of naturalistic {Super Mario Bros.} gameplay and an associated modelling study},
+  author  = {Paugam, Fran{\c{c}}ois and Harel, Yann and Pinsard, Basile and Boyle, Julie A. and Bellec, Pierre},
+  journal = {bioRxiv},
+  year    = {2025},
+  doi     = {10.1101/2025.11.28.691119},
+  note    = {VERIFY author list/title against the posted preprint}
+}
+
+@misc{cneuromod2025,
+  title        = {The {Courtois NeuroMod} project: dense {fMRI} data for neural modelling},
+  author       = {Bellec, Pierre and Boyle, Julie A. and Pinsard, Basile and others},
+  year         = {2025},
+  howpublished = {Zenodo},
+  doi          = {10.5281/zenodo.8147300},
+  url          = {https://docs.cneuromod.ca}
+}
+
+@misc{boyle2025ccn,
+  title        = {{CNeuroMod} Data Collection Complete: 200h of individual {fMRI} across diverse naturalistic and controlled tasks to build {NeuroAI} models},
+  author       = {Boyle, Julie A. and Pinsard, Basile and others},
+  year         = {2025},
+  howpublished = {Conference on Cognitive Computational Neuroscience (CCN), abstract},
+  url          = {https://2025.ccneuro.org/}
+}
+
+@article{harel2023controller,
+  title   = {An open-source fiber-optic magnetic-resonance-compatible video-game controller},
+  author  = {Harel, Yann and others},
+  journal = {PLOS ONE},
+  volume  = {18},
+  number  = {9},
+  pages   = {e0290158},
+  year    = {2023},
+  doi     = {10.1371/journal.pone.0290158},
+  note    = {VERIFY author list}
+}
+
+@misc{harel2025shinobi,
+  title        = {{shinobi\_fmri}: an annotation-based {GLM}/{MVPA} pipeline for naturalistic video-game {fMRI}},
+  author       = {Harel, Yann and Pinsard, Basile and Boyle, Julie A. and Bellec, Pierre},
+  year         = {2025},
+  howpublished = {In preparation; software at \url{https://github.com/courtois-neuromod/shinobi_fmri}}
+}
+
+% --- Emulation and reinforcement learning ----------------------------
+
+@misc{openai2018gymretro,
+  title        = {Gym {Retro}},
+  author       = {Nichol, Alex and Pfau, Vicki and Hesse, Christopher and Klimov, Oleg and Schulman, John},
+  year         = {2018},
+  howpublished = {OpenAI; \url{https://github.com/openai/retro}}
+}
+
+@misc{stableretro,
+  title        = {stable-retro: a maintained fork of {Gym Retro}},
+  author       = {{Farama Foundation}},
+  year         = {2023},
+  howpublished = {\url{https://github.com/Farama-Foundation/stable-retro}},
+  note         = {VERIFY version and citation format}
+}
+
+@misc{fceumm,
+  title        = {{FCEUmm}: {libretro} port of the {FCEU} {NES} emulator},
+  author       = {{libretro contributors}},
+  howpublished = {\url{https://github.com/libretro/libretro-fceumm}},
+  year         = {2023},
+  note         = {VERIFY}
+}
+
+@misc{smbdis,
+  title        = {A comprehensive {Super Mario Bros.} disassembly},
+  author       = {{doppelganger}},
+  year         = {2007},
+  howpublished = {\url{https://gist.github.com/1wErt3r/4048722}},
+  note         = {Public-domain annotated disassembly used to identify data tables; VERIFY preferred citation}
+}
+
+@misc{nesdev,
+  title        = {{NESdev} wiki: {PPU} palettes, pattern tables and {iNES} format},
+  author       = {{NESdev community}},
+  howpublished = {\url{https://www.nesdev.org/wiki/}},
+  year         = {2024},
+  note         = {VERIFY}
+}
+
+@article{schulman2017ppo,
+  title   = {Proximal policy optimization algorithms},
+  author  = {Schulman, John and Wolski, Filip and Dhariwal, Prafulla and Radford, Alec and Klimov, Oleg},
+  journal = {arXiv preprint arXiv:1707.06347},
+  year    = {2017}
+}
+
+% --- Visual complexity, naturalistic vision, games as stimuli ---------
+% TODO: identify and add key references on
+%   - visual complexity / clutter measures (e.g. feature congestion, edge density)
+%   - image statistics of natural vs. synthetic scenes
+%   - object-based vs. feature-based representations in visual cortex
+%   - controlled variants of naturalistic stimuli (e.g. line drawings vs photographs)
+%   - visual abstraction in RL generalisation (e.g. Procgen / CoinRun style-transfer studies)
