@@ -13,15 +13,14 @@ Design
       terrain    brown      ground, stairs, hard blocks, pipes, tree/mushroom
                             ledges, cloud terrain, cannons, bridges, used
                             blocks, moving platforms, springboards, vines
-      brick      grey       breakable bricks (and the castle wall, which
-                            shares their tile)
+      brick      grey       breakable bricks
       ?-block    orange     question blocks (and the sprite of a bumped block)
-      coin       yellow     coins in the level
-      item       green      mushroom, 1-up, fire flower, star, sprite coins
-                            popping out of blocks, and Mario's fireballs
+      coin       yellow     coins in the level and coins popping out of blocks
+      item       green      mushroom, 1-up, fire flower, star, vine
       enemy      red        every enemy and enemy projectile
       Mario      white      the player (flashes white/green/orange when
-                            invincible; fire Mario is also white)
+                            invincible)
+      fire Mario pale pink  Mario after a fire flower, and his fireballs
       goal       purple     flagpole, ball and flag, axe
 
 How the ROM is changed
@@ -34,10 +33,15 @@ How the ROM is changed
       to make ?-blocks and coins flash (all are copied verbatim into the PPU
       write buffer);
     - 4 bytes of the metatile graphics lookup table so pipe shafts stop
-      sharing tile $26 with the (transparent) hills.
-  These bytes only feed the PPU write buffer ($0300-$03FF).  Game logic, RAM
-  outside that buffer, .bk2 replays and savestates therefore stay identical to
-  the original ROM (verified on participant replays).
+      sharing tile $26 with the (transparent) hills, and 28 bytes of it so the
+      end-of-level castle (decoration) is drawn with blank tiles instead of
+      brick tiles;
+    - 4 immediate operands that choose the sprite palette of fireballs, coins
+      popping out of blocks and bumped blocks (--no-pipes disables these too).
+  These bytes only feed the PPU write buffer ($0300-$03FF) and the sprite
+  buffer ($0200-$02FF), which game logic never reads.  RAM outside those two
+  buffers, .bk2 replays and savestates therefore stay identical to the
+  original ROM (verified on participant replays).
 
 Usage: simplify_rom.py ORIGINAL.nes OUTPUT.nes [--no-pipes] [--no-palette]
 """
@@ -47,7 +51,7 @@ import sys, hashlib
 # NES master-palette indices.  Change these to retune the look.
 C = dict(
     backdrop=0x22, terrain=0x17, brick=0x10, qblock=0x27, coin=0x28,
-    item=0x2A, enemy=0x16, mario=0x30, mario_fire=0x30, goal=0x24, text=0x30,
+    item=0x2A, enemy=0x16, mario=0x30, mario_fire=0x36, goal=0x24, text=0x30,
 )
 
 # Each palette group holds 3 usable colours (index 1..3).  The tile tables
@@ -59,15 +63,15 @@ BG_PAL = [
     [C['backdrop'], C['qblock'], C['terrain'], C['coin']],   # BG3: ?-blocks, used blocks, coins
 ]
 SPR_PAL = [
-    [C['backdrop'], C['mario'],  C['item'],    C['goal']],   # SPR0: Mario (overridden by PLAYER_PAL)
+    [C['backdrop'], C['mario'],  C['item'],    C['mario_fire']],  # SPR0: Mario, fire flower, fireballs (overridden by PLAYER_PAL)
     [C['backdrop'], C['item'],   C['enemy'],   C['goal']],   # SPR1: koopas, hammer bros, piranha, flag, vine, 1-up
     [C['backdrop'], C['item'],   C['enemy'],   C['terrain']],# SPR2: spiny, cheeps, mushroom, star, coins, platforms
-    [C['backdrop'], C['qblock'], C['enemy'],   C['goal']],   # SPR3: goomba, buzzy, bullet bill, hammers, bumped block
+    [C['backdrop'], C['qblock'], C['enemy'],   C['coin']],   # SPR3: goomba, buzzy, bullet bill, hammers, bumped ?-block, coins
 ]
 PLAYER_PAL = [                      # rows used by the game: Mario / Luigi / fire Mario
-    [C['backdrop'], C['mario'],      C['item'], C['goal']],
-    [C['backdrop'], C['mario'],      C['item'], C['goal']],
-    [C['backdrop'], C['mario_fire'], C['item'], C['goal']],
+    [C['backdrop'], C['mario'],      C['item'], C['mario_fire']],
+    [C['backdrop'], C['mario'],      C['item'], C['mario_fire']],
+    [C['backdrop'], C['mario_fire'], C['item'], C['mario_fire']],
 ]
 # Star power makes the game cycle Mario's sprite through the 4 sprite palettes
 # (it rotates the attribute bits, not the colours).  Mario's tiles use index 1
@@ -120,9 +124,11 @@ def _spr(ids, v):
 _spr(list(range(0x00, 0x50)) + list(range(0x58, 0x60)) + list(range(0x90, 0x94)) + [0x9E, 0x9F], 1)  # Mario (SPR0 idx1)
 _spr(list(range(0x76, 0x7A)) + [0x8D, 0xE4, 0xD8, 0xD9, 0xE0, 0xE1], 1)                           # mushroom/1-up, star, flower, vine (item)
 _spr([0xD6, 0xD7], 2)                              # fire flower tiles drawn with Mario's palette (SPR0 idx2 = item)
-_spr(list(range(0x60, 0x64)) + [0xF7], 1)          # coin popping out of a block (item)
-_spr([0x64, 0x65], 1)                              # Mario's fireball (item colour, see docstring)
-_spr(list(range(0x84, 0x88)), 1)                   # bumped block sprite (SPR3 idx1 = ?-block)
+_spr(list(range(0x60, 0x64)), 3)                   # coin popping out of a block (moved to SPR3 idx3 = coin)
+_spr([0x64, 0x65], 3)                              # Mario's fireball (moved to SPR0 idx3 = fire-Mario colour)
+_spr([0x87], 1)                                    # bumped ?-block sprite (SPR3 idx1 = ?-block)
+_spr([0x85, 0x86], 3)                              # bumped brick sprite (moved to SPR2 idx3 = terrain)
+_spr([0x84], 0)                                    # brick debris: transparent
 _spr([0x5B, 0x75] + list(range(0xF0, 0xF4)), 3)    # moving platforms, springboard (SPR2 idx3 = terrain)
 _spr([0x50, 0x7E, 0x7F], 3)                        # flagpole flag (SPR1 idx3 = goal)
 _spr([0x66, 0x67, 0x68, 0x54, 0x55, 0x56, 0x57], 0)  # fireworks, castle flag: transparent
@@ -134,6 +140,13 @@ ORIG_MD5 = "811b027eaf99c2def7b933c5208636de"
 PIPE_PATCH = {  # metatile graphics table (file offset: expected -> new)
     0x0B20 + 4*0x15: (bytes([0x26,0x26,0x6A,0x6A]), bytes([0x69,0x69,0x6A,0x6A])),  # vertical pipe shaft, right half
     0x0B20 + 4*0x20: (bytes([0x26,0x93,0x26,0x93]), bytes([0x93,0x93,0x93,0x93])),  # sideways pipe shaft, bottom half
+}
+CASTLE_METATILES = 0x0BBC + 4*0x05                  # metatile graphics table, palette-1 entries #05-#0B: the end-of-level castle
+SPRITE_PATCHES = {  # file offset: (expected bytes, new bytes) - immediate operands that pick an object's sprite palette
+    0x6D0C: (bytes([0xA9, 0x02, 0x90, 0x02, 0x09, 0xC0]), bytes([0xA9, 0x00, 0x90, 0x02, 0x09, 0xC0])),  # fireball: palette 2 -> 0
+    0x66C1: (bytes([0xA9, 0x02, 0x99, 0x02, 0x02]),       bytes([0xA9, 0x03, 0x99, 0x02, 0x02])),        # coin from block: palette 2 -> 3
+    0x6BEB: (bytes([0xA9, 0x03, 0x85, 0x04, 0x4A]),       bytes([0xA9, 0x02, 0x85, 0x04, 0x4A])),        # bumped brick: palette 3 -> 2
+    0x6C2E: (bytes([0xF0, 0x01, 0x4A, 0xA6, 0x08]),       bytes([0xF0, 0x01, 0xEA, 0xA6, 0x08])),        # bumped ?-block: always palette 3 (was 1 outside ground areas)
 }
 AREA_PALETTES = [0x0CB4, 0x0CD8, 0x0CFC, 0x0D20]   # water, ground, underground, castle: "3F 00 20" + 32 bytes
 PLAYER_COLORS = 0x05E7                              # 3 rows x 4
@@ -172,6 +185,9 @@ def build(rom: bytes, patch_pipes=True, patch_palette=True) -> bytes:
     if patch_pipes:
         for off, (old, new) in PIPE_PATCH.items():
             _expect(rom, off, old); rom[off:off+4] = new
+        _expect(rom, CASTLE_METATILES, [0x9D, 0x47, 0x9E, 0x47]); rom[CASTLE_METATILES:CASTLE_METATILES+28] = bytes([0x24]*28)
+        for off, (old, new) in SPRITE_PATCHES.items():
+            _expect(rom, off, old); rom[off:off+len(new)] = new
     if patch_palette:
         pal = bytes(sum(BG_PAL, []) + sum(SPR_PAL, []))
         for off in AREA_PALETTES:

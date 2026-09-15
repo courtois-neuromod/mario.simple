@@ -69,12 +69,16 @@ The flagpole shaft keeps its thin shape but is recoloured. Text and HUD tiles
 are untouched. The full classification is the `BG` table in
 `code/simplify_rom.py`.
 
-One tile (`$26`) is used both as the fill of the decorative hills and as the
-inner column of every pipe shaft, so it cannot be both transparent and solid.
-We therefore also changed 4 bytes of the metatile-graphics table so that the
-two pipe-shaft metatiles use the pipe-edge tile instead of `$26`. This table
-is read only when the game writes a new screen column into the PPU write
-buffer (section 5 confirms that these are the only RAM bytes that differ).
+Two tiles are shared between categories. Tile `$26` is both the fill of the
+decorative hills and the inner column of every pipe shaft, and tile `$47` is
+both the breakable brick and the wall of the end-of-level castle, so neither
+can be both transparent and solid. We therefore also edited the
+metatile-graphics table: the two pipe-shaft metatiles use the pipe-edge tile
+instead of `$26` (4 bytes), and the seven castle metatiles use the blank tile
+(28 bytes), which makes the castle, a purely decorative object, disappear.
+This table is read only when the game writes a new screen column into the
+PPU write buffer (section 5 confirms that these are the only RAM bytes that
+differ).
 
 ### 3.2 Sprite tiles (CHR-ROM, pattern table `$0000`)
 
@@ -100,6 +104,19 @@ because the star-power effect rotates Mario's palette *attribute* through the
 four sprite palettes; with index 1 he flashes white / green / green / orange
 rather than enemy red.
 
+Four palettes with three indices each give twelve sprite colours, but the
+game's own palette assignments crowd some categories into the same palette
+(coins popping out of blocks, fireballs, the mushroom and the Spiny all use
+sprite palette 2). Where that prevented a category from having its own
+colour, we changed the palette the game assigns to the object. Each of these
+is a single immediate operand in the drawing routine of that object: the
+fireball now uses sprite palette 0 (Mario's) and index 3, coins popping out
+of blocks use palette 3 and index 3, the bumped brick uses palette 2 and
+index 3 (terrain colour, since no sprite palette has a slot left for the
+brick grey), and the bumped question block always uses palette 3 (the
+original used palette 1 outside ground areas). The brick debris sprites are
+transparent.
+
 ### 3.3 Palettes (PRG-ROM data tables)
 
 The game keeps four 32-byte palette sets (water, ground, underground,
@@ -113,12 +130,14 @@ every palette index means the same category everywhere:
 |---|---|---|---|---|---|---|---|---|
 | 1 | item | brick | text (white) | ?-block | Mario | item | item | ?-block |
 | 2 | terrain | terrain | terrain | terrain | item | enemy | enemy | enemy |
-| 3 | goal | goal | goal | coin | goal | goal | terrain | goal |
+| 3 | goal | goal | goal | coin | fire Mario | goal | terrain | coin |
 
 The backdrop is sky blue in every area, including underground and night
 levels. NES colour indices: backdrop `$22`, terrain `$17`, brick `$10`,
-?-block `$27`, coin `$28`, item `$2A`, enemy `$16`, Mario `$30`, goal `$24`.
-They are the `C` dictionary at the top of `code/simplify_rom.py`.
+?-block `$27`, coin `$28`, item `$2A`, enemy `$16`, Mario `$30`, fire Mario
+and fireballs `$36` (a pale pink, close to Mario's white so the change of
+state is visible without breaking the "player" family), goal `$24`. They are
+the `C` dictionary at the top of `code/simplify_rom.py`.
 
 ### 3.4 Summary of the binary changes
 
@@ -126,15 +145,15 @@ They are the `C` dictionary at the top of `code/simplify_rom.py`.
 |---|---|---|
 | iNES header | 0 | |
 | PRG-ROM code and level data | 0 | |
-| PRG-ROM presentation data | 162 | palette tables (158) and metatile-graphics table (4) |
-| CHR-ROM | 5546 | tile shapes |
+| PRG-ROM presentation data | 194 | palette tables (158), metatile-graphics table (32), sprite-palette operands (4) |
+| CHR-ROM | 5545 | tile shapes |
 
 ## 4. Reproducibility
 
 `code/simplify_rom.py ORIGINAL.nes OUTPUT.nes` rebuilds the ROM
 deterministically from the original ROM (md5 `811b027eaf99c2def7b933c5208636de`)
 and the tables in the script; every PRG patch asserts the original bytes
-before writing. The current ROM has md5 `602dcea8eefdc1f4510ceb0f971a9c65`.
+before writing. The current ROM has md5 `6d5c5d9971098043967715b6e86d8cce`.
 The tool used for the earlier, hand-made versions of this ROM (SMB Utility)
 is no longer needed.
 
@@ -147,13 +166,20 @@ emulator RAM after every frame. It also saves a state halfway through the run
 on the original ROM, loads it into the simplified ROM and replays the
 remaining inputs.
 
-Results on recordings from levels 1-1, 1-2, 1-3, 3-1, 4-2 and 5-1 (2800 to
-5300 frames each):
+Results on recordings from levels 1-1 (including one with fire Mario, star
+power and a completed level), 1-2, 1-3, 3-1, 4-2, 5-1 and 8-2 (2800 to 6000
+frames each):
 
 * with tile changes only, RAM is byte-identical on every frame;
-* with the pipe and palette patches, the only bytes that ever differ lie in
-  the PPU write buffer (`$0304-$0359`), on the frames where a screen column
-  or a palette is queued; nothing outside it differs on any frame;
+* with the pipe, castle and palette patches, the only bytes that ever differ
+  lie in the PPU write buffer (`$0304-$0359`), on the frames where a screen
+  column or a palette is queued;
+* with the sprite-palette operands as well, differences also appear in the
+  sprite buffer (`$0200-$02FF`, the attribute byte of the affected sprites)
+  and in one zero-page scratch byte (`$0004`) in which the block-drawing
+  routine hands the palette to a shared helper; nothing outside these
+  regions differs on any frame. The sprite buffer, the write buffer and that
+  scratch byte are written by the graphics path and never read by game logic;
 * savestates taken on either ROM load on the other and track the original
   run to the end; the fceumm savestate contains no tile data and no ROM
   checksum, and states saved on both ROMs at the same frame are
@@ -175,13 +201,18 @@ palettes leaves those tiles with the original colours.
 
 ## 6. Limitations and design decisions
 
-* **Castle wall.** The end-of-level castle is drawn with the brick tile, so
-  it appears as a grey mass with transparent windows. Unfixable without
-  changing level data; it works as a goal landmark.
-* **Fire Mario** is the same white as normal Mario (`mario_fire` in the colour
-  table can change that). Star power shows as white / green / orange flashing.
-* **Sprite coins and fireballs** are green (item) because they share a
-  palette slot with items; coins placed in the level are yellow.
+* **Castle.** The end-of-level castle is decoration and is now fully
+  transparent; the level visibly ends at the flagpole.
+* **Fire Mario** is pale pink, close to Mario's white, and his fireballs share
+  that colour. Star power shows as white / green / orange flashing, because
+  the game rotates Mario's palette attribute and index 1 of each sprite
+  palette is what it is.
+* **Bumped bricks** are drawn in terrain brown for the ~10 frames of the bump
+  animation: no sprite palette has a slot left for the brick grey. Bumped
+  ?-blocks stay orange. Brick debris is transparent.
+* **Shared tiles within a category** cannot be told apart: the 1-up and the
+  mushroom, the green and the red Koopa, all enemies in general, all share the
+  category colour by design.
 * **HUD.** The status line uses the text and ?-block entries, so the coin
   icon is orange and the text white, like Mario.
 * **Shape information is gone.** Objects are distinguished by colour and by

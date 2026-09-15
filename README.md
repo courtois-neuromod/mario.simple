@@ -22,12 +22,13 @@ its verification and its known limitations.
 |---|---|---|
 | background | sky blue | everything non-interactive (transparent) |
 | terrain | brown | ground, stairs, hard blocks, pipes, tree and mushroom ledges, cloud terrain, cannons, bridges, used blocks, moving platforms, springboards |
-| brick | grey | breakable bricks (and the castle wall, which shares their tile) |
+| brick | grey | breakable bricks |
 | ?-block | orange | question blocks, sprite of a bumped block |
-| coin | yellow | coins placed in the level |
-| item | green | mushroom, 1-up, fire flower, star, vine, coins popping out of blocks, Mario's fireballs |
+| coin | yellow | coins in the level and coins popping out of blocks |
+| item | green | mushroom, 1-up, fire flower, star, vine |
 | enemy | red | every enemy and enemy projectile |
 | Mario | white | the player (flashes white / green / orange with star power) |
+| fire Mario | pale pink | Mario after a fire flower, and his fireballs |
 | goal | purple | flagpole, ball, flag, axe |
 
 ## Contents
@@ -53,7 +54,7 @@ tail -c +17 SuperMarioBros-Nes/rom.nes | sha1sum | cut -d' ' -f1 > SuperMarioBro
 
 The original ROM is the one annexed in `mario.stimuli`
 (md5 `811b027eaf99c2def7b933c5208636de`). The current simplified ROM has md5
-`602dcea8eefdc1f4510ceb0f971a9c65`.
+`6d5c5d9971098043967715b6e86d8cce`.
 
 ## Checking a ROM against recordings
 
