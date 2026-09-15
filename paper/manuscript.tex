@@ -128,9 +128,9 @@ The simplified game was designed under three constraints.
 \begin{enumerate}
   \item \textbf{Functional transparency.} Any element with no effect on gameplay is removed from
   the image, i.e.\ rendered as the uniform backdrop. This includes clouds, hills, bushes,
-  background trees and trunks, fences, chains, bridge guard-rails, the water surface line,
-  sea plants, balance-lift ropes and pulleys, the end-of-level castle, fireworks and brick
-  debris.
+  background trees, tree trunks and the stumps under tree-top ledges, mushroom stems, fences,
+  chains, bridge guard-rails, the water surface line, sea plants, balance-lift ropes and pulleys,
+  the end-of-level castle, fireworks and brick debris.
   \item \textbf{Semantic colour coding.} Every element the player can interact with is drawn as
   a flat rectangle of a single colour, and the colour is a semantic category that is the same in
   every level regardless of the original day, night, underground or water palette
@@ -478,7 +478,7 @@ are all data that the game copies into the PPU write buffer or the sprite list.
     PRG-ROM: metatile graphics table & 32 & pipe shafts (4) and castle (28) \\
     PRG-ROM: object graphics tables & 4 & power-up attribute table (2), Bloober frame 2 top row (2) \\
     PRG-ROM: sprite-palette operands & 7 & fireball, block coin, bumped brick, bumped ?-block, vine, score numbers, flower/star palette cycling \\
-    CHR-ROM: tile shapes & 5{,}520 & 244 sprite tiles and 96 background tiles rewritten \\
+    CHR-ROM: tile shapes & 5{,}528 & 244 sprite tiles and 97 background tiles rewritten \\
     \bottomrule
   \end{tabular}
   \label{tab:changes}
@@ -491,7 +491,7 @@ The simplified cartridge is generated deterministically from the original by a s
 (\texttt{code/simplify\_rom.py}) that contains the tile classification, the colour table and the
 list of PRG patches; every PRG patch asserts the original bytes before writing. The input is the
 original ROM of the \textit{mario} stimulus set (MD5 \texttt{811b027e\ldots}); the output has MD5
-\texttt{f80e6aa2\ldots}. Companion tools reproduce the sprite survey
+\texttt{71482f93\ldots}. Companion tools reproduce the sprite survey
 (\texttt{survey\_sprite\_tiles.py}), the collision-box survey (\texttt{hitbox\_survey.py}), the
 verification of Section~\ref{sec:verification} (\texttt{verify\_replays.py}) and the palette
 rewrite of savestates (\texttt{fix\_state\_palette.py}). The stimulus is distributed as a drop-in replacement of the

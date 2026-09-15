@@ -18,7 +18,7 @@ keeping every other aspect of the task constant:
 
 * everything that has no effect on gameplay (clouds, bushes, hills, trees,
   fences, castle decoration, water surface, sea plants, ropes and pulleys,
-  fireworks, brick debris, Lakitu's cloud, Paratroopa wings) is removed, i.e.
+  fireworks, brick debris, tree trunks and ledge stumps, mushroom stems, Lakitu's cloud, Paratroopa wings) is removed, i.e.
   rendered as the uniform backdrop;
 * every interactive block is drawn as a flat, single-colour square, and every
   sprite object (the player, enemies, items, projectiles) as a flat rectangle
@@ -238,7 +238,7 @@ to Mario's white so the change of state is visible without breaking the
 | iNES header | 0 | |
 | PRG-ROM code and level data | 0 | |
 | PRG-ROM presentation data | 199 | palette tables (156), metatile-graphics table (32), enemy-graphics and power-up-attribute tables (4), sprite-palette operands (7) |
-| CHR-ROM | 5520 | tile shapes |
+| CHR-ROM | 5528 | tile shapes |
 
 The seven operands are the immediate values that select a sprite palette for
 fireballs, block coins, bumped bricks, bumped ?-blocks, vines and floating
@@ -251,7 +251,7 @@ Bloober frame, whose tile is a body tile in the first frame.
 `code/simplify_rom.py ORIGINAL.nes OUTPUT.nes` rebuilds the ROM
 deterministically from the original ROM (md5 `811b027eaf99c2def7b933c5208636de`)
 and the tables in the script; every PRG patch asserts the original bytes
-before writing. The current ROM has md5 `f80e6aa2039a68ddd8258a21d3741738`.
+before writing. The current ROM has md5 `71482f93c1aa578d80df3f87d294e490`.
 The tool used for the earlier, hand-made versions of this ROM (SMB Utility)
 is no longer needed.
 

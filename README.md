@@ -74,7 +74,7 @@ tail -c +17 SuperMarioBros-Nes/rom.nes | sha1sum | cut -d' ' -f1 > SuperMarioBro
 
 The original ROM is the one annexed in `mario.stimuli`
 (md5 `811b027eaf99c2def7b933c5208636de`). The current simplified ROM has md5
-`f80e6aa2039a68ddd8258a21d3741738`. `--no-hitbox` gives full-size squares
+`71482f93c1aa578d80df3f87d294e490`. `--no-hitbox` gives full-size squares
 instead of collision-box rectangles, `--no-marks` removes the shape cues.
 
 ## Checking a ROM against recordings

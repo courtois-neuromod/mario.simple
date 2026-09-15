@@ -124,7 +124,7 @@ _set([0x5D, 0x5E, 0x82, 0x83, 0x84, 0x85], 2)      # white-wall solid block (ter
 _set(range(0xC6, 0xCE), 2)                         # bullet bill cannon     (terrain)
 _set([0x2A, 0x40], 2)                              # cannon base            (terrain)
 _set([0xC1], 2)                                    # bridge                 (terrain)
-_set([0x52], 2)                                    # green ledge stump      (terrain)
+_set([0x52], None)                                 # green ledge stump under tree ledges: decoration, never in the block buffer
 _set(range(0x60, 0x6B), 2)                         # vertical pipes         (terrain)
 _set(range(0x86, 0x95), 2)                         # sideways pipes         (terrain)
 _set(range(0x4B, 0x52), 2)                         # tree-top ledges        (terrain)
