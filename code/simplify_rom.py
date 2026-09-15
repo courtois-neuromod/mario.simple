@@ -14,8 +14,8 @@ Design
   art; see HITBOX below).  Colour is a semantic category, identical in every
   level:
 
-      backdrop   sky blue    everything non-interactive
-      terrain    brown       ground, stairs, hard blocks, pipes, tree/mushroom
+      backdrop   black       everything non-interactive (also the WORLD x-y screens)
+      terrain    white       ground, stairs, hard blocks, pipes, tree/mushroom
                              ledges, cloud terrain, cannons, bridges, used
                              blocks, moving platforms, springboards, vines
       brick      grey        breakable bricks
@@ -24,11 +24,11 @@ Design
                              floating score numbers
       item       green       super mushroom
       1-up       dark green  1-up mushroom
-      star       cyan        starman
+      star       pale pink   starman
       enemy      red         every enemy and enemy projectile
-      Mario      white       the player (flashes white/green/orange when
+      Mario      light blue  the player (flashes blue/green/orange when
                              invincible)
-      fire Mario pale pink   Mario after a fire flower, his fireballs, and
+      fire Mario deep blue   Mario after a fire flower, his fireballs, and
                              the fire flower itself
       goal       purple      flagpole, ball and flag, axe, flagpole score
 
@@ -73,8 +73,8 @@ import sys, hashlib
 # ---------------------------------------------------------------- colours --
 # NES master-palette indices.  Change these to retune the look.
 C = dict(
-    backdrop=0x22, terrain=0x17, brick=0x10, qblock=0x27, coin=0x28,
-    item=0x2A, oneup=0x1A, star=0x2C, enemy=0x16, mario=0x30, mario_fire=0x36,
+    backdrop=0x0F, terrain=0x30, brick=0x10, qblock=0x27, coin=0x28,
+    item=0x2A, oneup=0x1A, star=0x35, enemy=0x16, mario=0x21, mario_fire=0x12,
     goal=0x24, text=0x30,
 )
 
@@ -99,7 +99,7 @@ PLAYER_PAL = [                      # rows used by the game: Mario / Luigi / fir
 ]
 # Star power makes the game cycle Mario's sprite through the 4 sprite palettes
 # (it rotates the attribute bits, not the colours).  Mario's tiles use index 1
-# so that this flashes white / green / green / orange, never enemy red.
+# so that this flashes light blue / dark green / green / orange, never enemy red.
 
 # ----------------------------------------------- background tiles ($1000) --
 # None -> transparent; 1/2/3 -> solid square of that palette index;

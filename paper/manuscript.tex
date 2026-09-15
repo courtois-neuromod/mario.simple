@@ -153,17 +153,17 @@ The simplified game was designed under three constraints.
     \toprule
     Category & Colour (NES) & Objects \\
     \midrule
-    background & sky blue (\hex{22}) & everything non-interactive, in every area type \\
-    terrain & brown (\hex{17}) & ground, stairs, hard blocks, pipes, tree-top and mushroom ledges, cloud terrain, cannons, bridges, used blocks, moving platforms, springboards, vines, bumped bricks \\
+    background & black (\hex{0F}) & everything non-interactive, in every area type, and the ``WORLD x-y'' screens \\
+    terrain & white (\hex{30}) & ground, stairs, hard blocks, pipes, tree-top and mushroom ledges, cloud terrain, cannons, bridges, used blocks, moving platforms, springboards, vines, bumped bricks \\
     brick & grey (\hex{10}) & breakable bricks \\
     ?-block & orange (\hex{27}) & question blocks, including the sprite of a bumped question block \\
     coin & yellow (\hex{28}) & coins in the level, coins popping out of blocks, floating score numbers \\
     item & green (\hex{2A}) & super mushroom \\
     1-up & dark green (\hex{1A}) & 1-up mushroom \\
-    star & cyan (\hex{2C}) & starman \\
+    star & pale pink (\hex{35}) & starman \\
     enemy & red (\hex{16}) & every enemy and enemy projectile (hammers, bullets) \\
-    player & white (\hex{30}) & Mario; flashes white / green / orange under star power \\
-    fire player & pale pink (\hex{36}) & Mario after a fire flower, his fireballs, and the fire flower itself \\
+    player & light blue (\hex{21}) & Mario; flashes blue / green / orange under star power \\
+    fire player & deep blue (\hex{12}) & Mario after a fire flower, his fireballs, and the fire flower itself \\
     goal & purple (\hex{24}) & flagpole, ball, flag, axe, flagpole score \\
     \bottomrule
   \end{tabular}
@@ -251,8 +251,8 @@ share a palette (the mushroom and the Spiny both use sprite palette~2, for insta
 are therefore separated by \emph{index} within a palette (enemies index~2, items index~1,
 platforms index~3), and the palettes of Section~\ref{sec:palettes} give each index its colour.
 The player's tiles use index~1 because the star-power effect rotates the player's palette
-\emph{attribute} through the four sprite palettes: with index~1 he flashes white, green, green
-and orange rather than enemy red.
+\emph{attribute} through the four sprite palettes: with index~1 he flashes light blue, dark
+green, green and orange rather than enemy red.
 
 Four palettes with three indices each give twelve sprite colours, but the game's own palette
 assignments crowd some categories into the same palette (coins popping out of blocks, fireballs,
@@ -264,7 +264,7 @@ fireball now uses the player's palette (index~3), coins popping out of blocks us
 slot left for the brick grey), the bumped question block always uses palette~3 (the original used
 palette~1 outside ground areas), the vine uses palette~2 (index~3, terrain: it is a climbable
 solid), and floating score numbers use palette~3 (index~3, coin colour). The fire flower and the
-star use the player's palette (index~3, the fire-player pink, and index~2, cyan), and the routine
+star use the player's palette (index~3, the fire-player deep blue, and index~2, pale pink), and the routine
 that cycles their top row through the four palettes every two frames now always selects
 palette~0. The 1-up and the super mushroom share their tiles and are told apart by the game with
 the palette alone (1 versus 2), so index~1 of palette~1 is a dedicated 1-up colour. Brick debris
@@ -381,14 +381,14 @@ striped.
     \midrule
     \multicolumn{3}{l}{\textit{Player}} \\
     small / big / crouching & sprite size and pose & kept: box $10\times12$ / $12\times24$ / $12\times12$ \\
-    fire state & palette & kept: pale pink \\
+    fire state & palette & kept: deep blue \\
     star invincibility & palette flashing & kept: the game rotates the palette attribute \\
     hurt invulnerability & blinking & kept: the game skips drawing every other frame \\
     facing direction & drawing & added: hole on the front side \\
     dying & death pose, then falling & added: hollow rectangle, plus the fall \\
     walking / jumping / skidding / climbing pose & animation frames & lost: frames share tiles, no colour slot; redundant with motion \\
     grow / shrink animation & frames alternate size & kept; box and rectangle disagree during the freeze \\
-    fireballs & drawing & kept: $8\times8$ pink, the exact box \\
+    fireballs & drawing & kept: $8\times8$ deep blue, the exact box \\
     \midrule
     \multicolumn{3}{l}{\textit{Enemies}} \\
     enemy vs.\ anything else & drawing & kept: red \\
@@ -407,12 +407,12 @@ striped.
     \midrule
     \multicolumn{3}{l}{\textit{Items and blocks}} \\
     super mushroom vs.\ 1-up & palette & added: green vs.\ dark green \\
-    fire flower; star & drawing, flashing & added: pink; cyan (flashing removed) \\
+    fire flower; star & drawing, flashing & added: deep blue; pale pink (flashing removed) \\
     coins & drawing & kept: yellow \\
-    ?-block vs.\ used block; brick vs.\ hard block & drawing & kept: orange (flashing) vs.\ brown; grey vs.\ brown \\
+    ?-block vs.\ used block; brick vs.\ hard block & drawing & kept: orange (flashing) vs.\ white; grey vs.\ white \\
     content of blocks, hidden blocks, enterable pipes & invisible in the original & same as original \\
-    vine (climbable); springboard & drawing & added: terrain brown; stripes \\
-    lifts & drawing, motion & kept: brown bars, motion \\
+    vine (climbable); springboard & drawing & added: terrain white; stripes \\
+    lifts & drawing, motion & kept: white bars, motion \\
     Bullet Bill cannon & drawing & lost as a danger source: solid terrain, drawn as such \\
     flagpole, flag, axe; castle & drawing & kept: purple; removed (decoration) \\
     area theme & palettes, decoration & removed by design \\
@@ -435,9 +435,11 @@ variants for snow and mushroom areas, a 12-byte player palette table (Mario, Lui
 an 8-byte backdrop-colour table, and two small tables used to animate question blocks and coins by
 rewriting background palette~3 every 8 frames. All of these were overwritten so that every
 palette index means the same category everywhere (Table~\ref{tab:palettes}). The backdrop is
-sky blue in every area, including underground and night levels. The fire-player colour
-(\hex{36}, a pale pink) was chosen close to the player's white so that the change of state is
-visible while keeping the object in the ``player'' family; fireballs and the fire flower share it.
+black in every area, including the ``WORLD x-y'' screens. Terrain is white rather than the
+natural brown so that it sits far from enemy red, two adjacent NES hues of similar brightness,
+and the player is blue. The fire-player colour (\hex{12}, a deep blue) was chosen next to the
+player's light blue so that the change of state is visible while keeping the object in the
+``player'' family; fireballs and the fire flower share it. HUD text shares the terrain white.
 
 \begin{table}[t]
   \caption{Meaning of each palette index after the modification. BG: background palettes; SPR:
@@ -491,7 +493,7 @@ The simplified cartridge is generated deterministically from the original by a s
 (\texttt{code/simplify\_rom.py}) that contains the tile classification, the colour table and the
 list of PRG patches; every PRG patch asserts the original bytes before writing. The input is the
 original ROM of the \textit{mario} stimulus set (MD5 \texttt{811b027e\ldots}); the output has MD5
-\texttt{71482f93\ldots}. Companion tools reproduce the sprite survey
+\texttt{626c6792\ldots}. Companion tools reproduce the sprite survey
 (\texttt{survey\_sprite\_tiles.py}), the collision-box survey (\texttt{hitbox\_survey.py}), the
 verification of Section~\ref{sec:verification} (\texttt{verify\_replays.py}) and the palette
 rewrite of savestates (\texttt{fix\_state\_palette.py}). The stimulus is distributed as a drop-in replacement of the
@@ -523,8 +525,8 @@ Two properties of the recordings matter for rendering them on the simplified ROM
 recording's initial savestate carries the PPU palette of the moment it was captured, i.e.\ the
 original colours, and the game rewrites palettes only when an area loads. 3{,}231 of the 3{,}374
 recordings start on the ``WORLD x-y'' screen, so the level palette is written about 120 frames
-later, but that first screen is drawn with the stored palette (black, with the original player
-colours) whereas later intermissions are drawn by the simplified ROM (sky blue, white player); 143
+later, but that first screen is drawn with the stored palette (original player colours) whereas
+later intermissions are drawn by the simplified ROM (blue player); 143
 recordings (79 of them the first repetition of a run) start in gameplay and would keep the original
 colours until the next area change. A companion tool rewrites the 32 palette bytes inside the
 initial state; the run is RAM-identical afterwards, and the level savestates of the stimulus set
@@ -659,12 +661,12 @@ colour count and spectral slope for original / simplified / \textit{mariostars} 
 comparisons in the CNeuroMod cohort; a free semantic segmentation of every frame; a testbed for
 the visual abstraction question in RL.}
 
-\TODO{Design decisions and their rationale: colour as the category cue; drawings replaced by
+\TODO{Design decisions and their rationale: colour as the category cue; black backdrop, white terrain and blue player; drawings replaced by
 the collision box, so objects shrink to what the game reacts to (a design choice that trades the
 familiar silhouette for a faithful one; the generator can produce full squares); the small set of
 shape cues and why each was needed (Table~\ref{tab:semantics}); what was deliberately not
 encoded (species, red vs.\ green Koopa, Buzzy's fireball immunity, pose); why the backdrop is
-uniform even underground; why bumped bricks are brown; why the castle is removed; why star power
+uniform and black; why bumped bricks are terrain-coloured; why the castle is removed; why star power
 still flashes while the star item does not.}
 
 \TODO{Generality of the method: applies to any NES title (and, with the same logic, to other

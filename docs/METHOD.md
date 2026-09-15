@@ -26,7 +26,8 @@ keeping every other aspect of the task constant:
   reacts to;
 * colour is a semantic category (terrain, brick, ?-block, coin, item, 1-up,
   star, enemy, player, fire player, goal) that is identical in every level,
-  whatever the original day / night / underground / water palette;
+  whatever the original day / night / underground / water palette, on a black
+  backdrop;
 * the game states that matter for play but that colour cannot carry (the
   side Mario faces, dying, a kickable shell, an enemy that cannot be stomped,
   a winged enemy) are encoded by a few simple shapes;
@@ -107,8 +108,8 @@ different categories can share a palette (e.g. the mushroom and the Spiny both
 use sprite palette 2). Categories are therefore separated by *index* within a
 palette, and the palettes of section 3.4 give each index its colour. Mario's
 tiles use index 1 because the star-power effect rotates Mario's palette
-*attribute* through the four sprite palettes; with index 1 he flashes white /
-green / green / orange rather than enemy red.
+*attribute* through the four sprite palettes; with index 1 he flashes light
+blue / dark green / green / orange rather than enemy red.
 
 Four palettes with three indices each give twelve sprite colours, but the
 game's own palette assignments crowd some categories into the same palette.
@@ -122,7 +123,7 @@ bumped question block always uses palette 3 (the original used palette 1
 outside ground areas); the vine uses palette 2 and index 3 (terrain: it is a
 climbable solid); floating score numbers use palette 3 and index 3 (coin
 colour); the fire flower and the star use palette 0 (index 3, the fire-Mario
-pink, and index 2, cyan) and the routine that cycles their top row through
+deep blue, and index 2, pale pink) and the routine that cycles their top row through
 the four palettes every two frames now always selects palette 0. The 1-up and
 the super mushroom share their tiles and are told apart by the game with the
 palette (1 vs 2), so index 1 of palette 1 is a dedicated 1-up colour. The
@@ -223,12 +224,15 @@ every palette index means the same category everywhere:
 | 2 | terrain | terrain | terrain | terrain | star | enemy | enemy | enemy |
 | 3 | goal | goal | goal | coin | fire Mario | goal | terrain | coin |
 
-The backdrop is sky blue in every area, including underground and night
-levels. NES colour indices: backdrop `$22`, terrain `$17`, brick `$10`,
+The backdrop is black in every area, on the "WORLD x-y" screens included.
+Terrain is white rather than the natural brown so that it sits far from enemy
+red (the two were adjacent NES hues of similar brightness), and the player is
+blue. NES colour indices: backdrop `$0F`, terrain `$30`, brick `$10`,
 ?-block `$27`, coin `$28`, item `$2A`, 1-up `$1A`, star `$2C`, enemy `$16`,
-Mario `$30`, fire Mario, fireballs and fire flower `$36` (a pale pink, close
-to Mario's white so the change of state is visible without breaking the
-"player" family), goal `$24`. They are the `C` dictionary at the top of
+Mario `$21` (light blue), fire Mario, fireballs and fire flower `$12` (a deep
+blue, so the change of state is visible without breaking the "player"
+family), goal `$24`. HUD text shares the terrain white; the HUD is outside
+the play area. They are the `C` dictionary at the top of
 `code/simplify_rom.py`.
 
 ### 3.5 Summary of the binary changes
@@ -251,7 +255,7 @@ Bloober frame, whose tile is a body tile in the first frame.
 `code/simplify_rom.py ORIGINAL.nes OUTPUT.nes` rebuilds the ROM
 deterministically from the original ROM (md5 `811b027eaf99c2def7b933c5208636de`)
 and the tables in the script; every PRG patch asserts the original bytes
-before writing. The current ROM has md5 `71482f93c1aa578d80df3f87d294e490`.
+before writing. The current ROM has md5 `626c679210364593883e8be91dac7f99`.
 The tool used for the earlier, hand-made versions of this ROM (SMB Utility)
 is no longer needed.
 
@@ -308,9 +312,9 @@ initial savestate (`Core.bin`) carries the PPU palette of the moment it was
 captured, i.e. the original colours, and the game only rewrites the palette
 when an area loads. 3231 of the 3374 dataset recordings start on the
 "WORLD x-y" screen, so the level palette is written about 120 frames later;
-but that first screen itself is drawn with the stored palette, black with an
-original-coloured Mario icon, whereas every later intermission (after a death)
-is drawn by the simplified ROM, sky blue with a white icon. The other 143
+but that first screen itself is drawn with the stored palette (original
+Mario icon colours), whereas every later intermission (after a death) is
+drawn by the simplified ROM (light-blue icon). The other 143
 recordings (79 of them the first repetition of a run) start in gameplay and
 keep the original colours on the simplified ROM until the next area change,
 which makes, for instance, Lakitu white and pipes green.
@@ -319,10 +323,9 @@ which makes, for instance, Lakitu white and pipes green.
 recording makes both cases consistent. The 26 level savestates of this
 repository have been rewritten this way (their game state is untouched; the
 600-frame scripted-play check of this section was repeated with them), so new
-recordings made on the simplified ROM start on a sky-blue screen. The
+recordings made on the simplified ROM start with the simplified palette. The
 intermission backdrop comes from the same table entry as the underground
-backdrop, so making it black instead would also make underground levels
-black; the uniform sky blue was kept.
+backdrop, which is why one backdrop colour is used for both.
 
 ## 6. Semantic information: what is kept, what was added, what is lost
 
@@ -339,14 +342,14 @@ shapes.
 | Information | Original cue | Simplified ROM |
 |---|---|---|
 | small / big / crouching | sprite size and pose | kept: box size 10x12 / 12x24 / 12x12 |
-| fire Mario | white-red palette | kept: pale pink |
-| star invincibility | palette flashing | kept: white / green / orange flashing (the game rotates the palette attribute) |
+| fire Mario | white-red palette | kept: deep blue |
+| star invincibility | palette flashing | kept: blue / green / orange flashing (the game rotates the palette attribute) |
 | hurt invulnerability | Mario blinks | kept (the game skips drawing him every other frame) |
 | facing direction | drawing | added: 2x2 hole on the front side |
 | dying | death pose, then falling | added: hollow rectangle, plus the fall |
 | walking / running / jumping / skidding / climbing / swimming pose | animation frames | lost: the frames share tiles with no free colour slot, and the pose is redundant with the motion |
 | grow / shrink animation | frames alternate size | kept as in the original; the rectangle and the box disagree during those frames, when collisions are frozen |
-| fireballs | orange balls | kept: 8x8 pink squares, the exact box |
+| fireballs | orange balls | kept: 8x8 deep-blue squares, the exact box |
 
 **Enemies**
 
@@ -372,16 +375,16 @@ shapes.
 | Information | Original cue | Simplified ROM |
 |---|---|---|
 | super mushroom vs 1-up | palette (red vs green) | added: green vs dark green |
-| fire flower | drawing, flashing | added: pale pink, the fire-Mario colour; the flashing is removed |
-| star | drawing, flashing | added: cyan; the flashing is removed |
+| fire flower | drawing, flashing | added: deep blue, the fire-Mario colour; the flashing is removed |
+| star | drawing, flashing | added: pale pink; the flashing is removed |
 | coins, coins from blocks | drawing | kept: yellow |
-| ?-block vs used block | orange flashing vs brown | kept: orange flashing vs terrain brown |
-| brick vs hard block | drawing | kept: grey vs brown |
+| ?-block vs used block | orange flashing vs brown | kept: orange flashing vs terrain white |
+| brick vs hard block | drawing | kept: grey vs white |
 | content of a brick or block, hidden blocks | none (invisible in the original) | same as original |
 | enterable pipe | none in the original | same as original |
-| vine (climbable) | drawing | added: terrain brown (was item green) |
+| vine (climbable) | drawing | added: terrain white (was item green) |
 | springboard | drawing, compression frames | added: stripes; the compression frames are kept |
-| moving / falling lifts | drawing, motion | kept: brown bars, motion |
+| moving / falling lifts | drawing, motion | kept: white bars, motion |
 | Bullet Bill cannon | drawing | lost as a "danger source": it is solid terrain and drawn as such |
 | flagpole, flag, ball; axe | drawing | kept: purple |
 | end-of-level castle | drawing | removed (decoration; the level visibly ends at the flagpole) |
@@ -415,24 +418,24 @@ shapes.
   the game computes it before the final position update of the frame.
 * **Castle.** The end-of-level castle is decoration and is now fully
   transparent; the level visibly ends at the flagpole.
-* **Fire Mario** is pale pink, close to Mario's white; his fireballs and the
-  fire flower share that colour. Star power shows as white / green / orange
+* **Fire Mario** is deep blue, next to Mario's light blue; his fireballs and
+  the fire flower share that colour. Star power shows as blue / green / orange
   flashing, because the game rotates Mario's palette attribute and index 1 of
   each sprite palette is what it is; the star item itself no longer flashes.
-* **Bumped bricks** are drawn in terrain brown for the ~10 frames of the bump
+* **Bumped bricks** are drawn in terrain white for the ~10 frames of the bump
   animation: no sprite palette has a slot left for the brick grey. Bumped
   ?-blocks stay orange. Brick debris is transparent.
 * **Shared tiles within a category** cannot be told apart: the green and the
   red Koopa, the Buzzy Beetle and the other enemies, all share the category
   colour (section 6).
 * **HUD.** The status line uses the text and ?-block entries, so the coin
-  icon is orange and the text white, like Mario.
+  icon is orange and the text white, like the terrain.
 * **Shape information is reduced to the box.** Objects are distinguished by
   colour, by the size of their collision box and by the shape marks of
   section 3.3; pose is gone.
 * **Savestates carry a palette.** A recording's `Core.bin` keeps the original
   palette until the next area load, which shows on its first "WORLD x-y"
-  screen (black, original Mario icon) and, for recordings that start
+  screen (original Mario icon colours) and, for recordings that start
   mid-level, in the level itself; rewrite it with `code/fix_state_palette.py`
   (section 5). The level states of this repository are already rewritten.
 * **Castle levels.** The `Level?-4.state` files, inherited from

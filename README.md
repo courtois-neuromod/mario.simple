@@ -24,17 +24,17 @@ and the known limitations.
 
 | Category | Colour | Objects |
 |---|---|---|
-| background | sky blue | everything non-interactive (transparent) |
-| terrain | brown | ground, stairs, hard blocks, pipes, tree and mushroom ledges, cloud terrain, cannons, bridges, used blocks, moving platforms, springboards, vines |
+| background | black | everything non-interactive (transparent), and the "WORLD x-y" screens |
+| terrain | white | ground, stairs, hard blocks, pipes, tree and mushroom ledges, cloud terrain, cannons, bridges, used blocks, moving platforms, springboards, vines |
 | brick | grey | breakable bricks |
 | ?-block | orange | question blocks, sprite of a bumped block |
 | coin | yellow | coins in the level, coins popping out of blocks, floating score numbers |
 | item | green | super mushroom |
 | 1-up | dark green | 1-up mushroom |
-| star | cyan | starman |
+| star | pale pink | starman |
 | enemy | red | every enemy and enemy projectile |
-| Mario | white | the player (flashes white / green / orange with star power) |
-| fire Mario | pale pink | Mario after a fire flower, his fireballs, and the fire flower itself |
+| Mario | light blue | the player (flashes blue / green / orange with star power) |
+| fire Mario | deep blue | Mario after a fire flower, his fireballs, and the fire flower itself |
 | goal | purple | flagpole, ball, flag, axe, flagpole score |
 
 ## Shape legend
@@ -74,7 +74,7 @@ tail -c +17 SuperMarioBros-Nes/rom.nes | sha1sum | cut -d' ' -f1 > SuperMarioBro
 
 The original ROM is the one annexed in `mario.stimuli`
 (md5 `811b027eaf99c2def7b933c5208636de`). The current simplified ROM has md5
-`71482f93c1aa578d80df3f87d294e490`. `--no-hitbox` gives full-size squares
+`626c679210364593883e8be91dac7f99`. `--no-hitbox` gives full-size squares
 instead of collision-box rectangles, `--no-marks` removes the shape cues.
 
 ## Checking a ROM against recordings
@@ -91,9 +91,9 @@ where each integration folder holds a `rom.nes` next to copies of this repo's
 The game writes its palettes only when an area loads, and a recording's
 initial savestate (`Core.bin`) carries the palette that was in the PPU when it
 was captured, i.e. the original colours. 3231 of the 3374 dataset recordings
-start on the "WORLD x-y" screen: that first screen is then black with an
+start on the "WORLD x-y" screen: that first screen then shows an
 original-coloured Mario icon (later ones, drawn by the simplified ROM after a
-death, are sky blue with a white icon), and the level itself renders correctly
+death, show a light-blue icon), and the level itself renders correctly
 once its palette is written a few frames later. The other 143 (mostly the
 first repetition of a run) start in gameplay and would keep the original
 colours until the next area change. Rewrite the initial state of every
