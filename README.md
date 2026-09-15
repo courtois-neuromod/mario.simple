@@ -55,7 +55,7 @@ and the known limitations.
 |---|---|
 | `SuperMarioBros-Nes/rom.nes` | the simplified ROM (git-annex) |
 | `SuperMarioBros-Nes/rom.sha` | sha1 of the ROM body (without iNES header), as gym-retro expects |
-| `SuperMarioBros-Nes/Level*.state` | level savestates, unchanged from `mario.stimuli` |
+| `SuperMarioBros-Nes/Level*.state` | level savestates from `mario.stimuli`, with the 32 palette bytes inside rewritten to the simplified palette (otherwise the first "WORLD x-y" screen is black with an original-coloured Mario icon); game state unchanged |
 | `SuperMarioBros-Nes/data.json`, `scenario.json`, `metadata.json` | RAM variables, reward/done definition, agent benchmarks, unchanged |
 | `code/simplify_rom.py` | builds the simplified ROM from the original ROM (the tile, colour, collision-box and shape tables live here) |
 | `code/verify_replays.py` | replays `.bk2` recordings on two ROMs and checks RAM identity and savestate portability |
@@ -91,10 +91,13 @@ where each integration folder holds a `rom.nes` next to copies of this repo's
 The game writes its palettes only when an area loads, and a recording's
 initial savestate (`Core.bin`) carries the palette that was in the PPU when it
 was captured, i.e. the original colours. 3231 of the 3374 dataset recordings
-start on the black "WORLD x-y" screen, so the level's palette is written a few
-frames later and they render correctly. The other 143 (mostly the first
-repetition of a run) start in gameplay and would keep the original colours
-until the next area change. Rewrite their initial state before replaying:
+start on the "WORLD x-y" screen: that first screen is then black with an
+original-coloured Mario icon (later ones, drawn by the simplified ROM after a
+death, are sky blue with a white icon), and the level itself renders correctly
+once its palette is written a few frames later. The other 143 (mostly the
+first repetition of a run) start in gameplay and would keep the original
+colours until the next area change. Rewrite the initial state of every
+recording before replaying; it makes both cases consistent:
 
 ```
 unzip -p recording.bk2 Core.bin > Core.bin

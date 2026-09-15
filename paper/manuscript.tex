@@ -522,10 +522,13 @@ count.}
 Two properties of the recordings matter for rendering them on the simplified ROM. First, a
 recording's initial savestate carries the PPU palette of the moment it was captured, i.e.\ the
 original colours, and the game rewrites palettes only when an area loads. 3{,}231 of the 3{,}374
-recordings start on the black ``WORLD x-y'' screen, so the level palette is written about 120
-frames later; 143 (79 of them the first repetition of a run) start in gameplay and would keep the
-original colours until the next area change. A companion tool rewrites the 32 palette bytes inside
-the initial state; the run is RAM-identical afterwards. Second, where a collision box sticks out of
+recordings start on the ``WORLD x-y'' screen, so the level palette is written about 120 frames
+later, but that first screen is drawn with the stored palette (black, with the original player
+colours) whereas later intermissions are drawn by the simplified ROM (sky blue, white player); 143
+recordings (79 of them the first repetition of a run) start in gameplay and would keep the original
+colours until the next area change. A companion tool rewrites the 32 palette bytes inside the
+initial state; the run is RAM-identical afterwards, and the level savestates of the stimulus set
+are distributed rewritten. Second, where a collision box sticks out of
 the drawn sprite, the missing pixels are not drawn, because that would require additional sprite
 entries: Hammer Bro's box extends 4~px below his feet, lifts have a 5-px landing-tolerance zone
 under the bar, a hammer's $8\times8$ box is offset 4~px from its tile so half of it is undrawable,

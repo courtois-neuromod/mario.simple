@@ -8,7 +8,10 @@ when a new area loads.  The 26 level states in this repo start on the black
 scene-level states) would show original colours until the next area load.
 
 This finds the 32-byte palette block in the (gzip) state and replaces it with
-the palette simplify_rom.py installs.  Usage:
+the palette simplify_rom.py installs, backdrop included (a state saved on the
+"WORLD x-y" screen holds the original black backdrop and Mario colours, which
+would otherwise make the first intermission of a run look different from the
+later ones).  Usage:
 
     fix_state_palette.py IN.state OUT.state
 """
@@ -41,8 +44,7 @@ def fix(data: bytes):
         for m in pat.finditer(data):
             i = m.start(); block = bytearray(data[i:i+32])
             for k in range(32):
-                if k % 4 == 0: continue            # keep stored index-0 bytes
-                block[k] = NEW[k]
+                block[k] = NEW[k]                  # index-0 bytes too: one backdrop everywhere (the stored one is black on the "WORLD x-y" screen)
             block[17:20] = bytes(sr.PLAYER_PAL[0][1:])  # Mario row
             data = data[:i] + bytes(block) + data[i+32:]; n += 1
     return data, n

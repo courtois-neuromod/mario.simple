@@ -306,13 +306,23 @@ rewriting background palette 3 from its own tables; patching only the area
 palettes leaves those tiles with the original colours. Third, a recording's
 initial savestate (`Core.bin`) carries the PPU palette of the moment it was
 captured, i.e. the original colours, and the game only rewrites the palette
-when an area loads. 3231 of the 3374 dataset recordings start on the black
+when an area loads. 3231 of the 3374 dataset recordings start on the
 "WORLD x-y" screen, so the level palette is written about 120 frames later;
-143 (79 of them the first repetition of a run) start in gameplay and keep the
-original colours on the simplified ROM until the next area change, which
-makes, for instance, Lakitu white and pipes green. `code/fix_state_palette.py`
-rewrites the 32 palette bytes inside a state or `Core.bin`; the run is
-RAM-identical afterwards, and applying it to every recording is harmless.
+but that first screen itself is drawn with the stored palette, black with an
+original-coloured Mario icon, whereas every later intermission (after a death)
+is drawn by the simplified ROM, sky blue with a white icon. The other 143
+recordings (79 of them the first repetition of a run) start in gameplay and
+keep the original colours on the simplified ROM until the next area change,
+which makes, for instance, Lakitu white and pipes green.
+`code/fix_state_palette.py` rewrites the 32 palette bytes inside a state or
+`Core.bin`; the run is RAM-identical afterwards, and applying it to every
+recording makes both cases consistent. The 26 level savestates of this
+repository have been rewritten this way (their game state is untouched; the
+600-frame scripted-play check of this section was repeated with them), so new
+recordings made on the simplified ROM start on a sky-blue screen. The
+intermission backdrop comes from the same table entry as the underground
+backdrop, so making it black instead would also make underground levels
+black; the uniform sky blue was kept.
 
 ## 6. Semantic information: what is kept, what was added, what is lost
 
@@ -420,10 +430,11 @@ shapes.
 * **Shape information is reduced to the box.** Objects are distinguished by
   colour, by the size of their collision box and by the shape marks of
   section 3.3; pose is gone.
-* **Recordings that start mid-level** keep the original palette until the
-  next area load unless their `Core.bin` is rewritten with
-  `code/fix_state_palette.py` (section 5). The level states used by the
-  dataset start on the black "WORLD x-y" screen and are unaffected.
+* **Savestates carry a palette.** A recording's `Core.bin` keeps the original
+  palette until the next area load, which shows on its first "WORLD x-y"
+  screen (black, original Mario icon) and, for recordings that start
+  mid-level, in the level itself; rewrite it with `code/fix_state_palette.py`
+  (section 5). The level states of this repository are already rewritten.
 * **Castle levels.** The `Level?-4.state` files, inherited from
   `mario.stimuli`, are not savestates (they are an 813-byte JSON file) and
   cannot be loaded; castle levels are not part of the dataset.
