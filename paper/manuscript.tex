@@ -71,8 +71,11 @@ the game itself is left untouched. Every decorative element (clouds, hills, bush
 fences, castle, water plants) is made transparent, and every object the player can interact
 with (ground, bricks, question blocks, coins, pipes, platforms, enemies, items, the player, the
 goal) is drawn as a flat square whose colour encodes its semantic category identically in every
-level. The modification rewrites only the graphics memory and the palette tables of the game
-cartridge; program code, level data and random-number generation are unchanged. We verify on
+level; moving objects are drawn as the exact rectangle of their collision box, and the few game
+states that colour cannot carry (facing direction, dying, a kickable shell, an enemy that cannot
+be stomped, a winged enemy) are encoded by simple shapes. The modification rewrites only the
+graphics memory and the presentation tables of the game cartridge; program code, level data and
+random-number generation are unchanged. We verify on
 participant recordings from the Courtois NeuroMod \textit{mario} dataset that the simplified
 game replays controller inputs frame-for-frame identically to the original, that savestates are
 interchangeable between the two versions, and that all RAM-derived behavioural variables are
@@ -129,9 +132,12 @@ The simplified game was designed under three constraints.
   sea plants, balance-lift ropes and pulleys, the end-of-level castle, fireworks and brick
   debris.
   \item \textbf{Semantic colour coding.} Every element the player can interact with is drawn as
-  a flat square of a single colour, and the colour is a semantic category that is the same in
+  a flat rectangle of a single colour, and the colour is a semantic category that is the same in
   every level regardless of the original day, night, underground or water palette
-  (Table~\ref{tab:legend}).
+  (Table~\ref{tab:legend}). Moving objects are drawn as the exact rectangle of the collision box
+  the game uses for them, so that what is seen is what the game reacts to
+  (Section~\ref{sec:hitbox}); the game states that matter for play but that colour cannot carry
+  are encoded by a few simple shapes (Table~\ref{tab:shapes}).
   \item \textbf{Logical identity.} Program code, physics, level layouts, enemy behaviour, RAM
   layout and random-number generation are untouched, so that controller recordings and savestates
   made on the original game remain valid on the simplified one, RAM-derived behavioural variables
@@ -148,15 +154,17 @@ The simplified game was designed under three constraints.
     Category & Colour (NES) & Objects \\
     \midrule
     background & sky blue (\hex{22}) & everything non-interactive, in every area type \\
-    terrain & brown (\hex{17}) & ground, stairs, hard blocks, pipes, tree-top and mushroom ledges, cloud terrain, cannons, bridges, used blocks, moving platforms, springboards, bumped bricks \\
+    terrain & brown (\hex{17}) & ground, stairs, hard blocks, pipes, tree-top and mushroom ledges, cloud terrain, cannons, bridges, used blocks, moving platforms, springboards, vines, bumped bricks \\
     brick & grey (\hex{10}) & breakable bricks \\
     ?-block & orange (\hex{27}) & question blocks, including the sprite of a bumped question block \\
-    coin & yellow (\hex{28}) & coins in the level and coins popping out of blocks \\
-    item & green (\hex{2A}) & mushroom, 1-up, fire flower, star, vine \\
+    coin & yellow (\hex{28}) & coins in the level, coins popping out of blocks, floating score numbers \\
+    item & green (\hex{2A}) & super mushroom \\
+    1-up & dark green (\hex{1A}) & 1-up mushroom \\
+    star & cyan (\hex{2C}) & starman \\
     enemy & red (\hex{16}) & every enemy and enemy projectile (hammers, bullets) \\
     player & white (\hex{30}) & Mario; flashes white / green / orange under star power \\
-    fire player & pale pink (\hex{36}) & Mario after a fire flower, and his fireballs \\
-    goal & purple (\hex{24}) & flagpole, ball, flag, axe \\
+    fire player & pale pink (\hex{36}) & Mario after a fire flower, his fireballs, and the fire flower itself \\
+    goal & purple (\hex{24}) & flagpole, ball, flag, axe, flagpole score \\
     \bottomrule
   \end{tabular}
   \label{tab:legend}
@@ -225,9 +233,9 @@ screen column into the PPU write buffer.
 \subsection{Sprite tiles}
 \label{sec:sprites}
 
-Every sprite tile below \hex{F6} becomes a solid square (the floating score digits
-\hex{F6}--\hex{FF} are kept). The index a tile receives depends on which object draws it, and
-this was \emph{measured} rather than assumed. The game builds its sprite list in RAM
+Every sprite tile below \hex{F6} becomes a flat rectangle (the floating score digits
+\hex{F6}--\hex{FF} keep their glyphs). The colour index a tile receives depends on which object
+draws it, and this was \emph{measured} rather than assumed. The game builds its sprite list in RAM
 (\hex{0200}--\hex{02FF}) and keeps, for the player, each of six enemy slots (one of which hosts
 the power-up object), bumped blocks, bubbles, fireballs and miscellaneous objects, the offset of
 their entries (\hex{06E4}--\hex{06FB}); enemy identifiers and active flags are at
@@ -250,11 +258,174 @@ Four palettes with three indices each give twelve sprite colours, but the game's
 assignments crowd some categories into the same palette (coins popping out of blocks, fireballs,
 the mushroom and the Spiny all use sprite palette~2). Where that prevented a category from having
 its own colour, we changed the palette the game assigns to the object; each change is a single
-immediate operand in that object's drawing routine (Table~\ref{tab:changes}). The fireball now
-uses the player's palette (index~3), coins popping out of blocks use palette~3 (index~3), the
-bumped brick uses palette~2 (index~3, terrain colour, as no sprite palette has a slot left for the
-brick grey), and the bumped question block always uses palette~3 (the original used palette~1
-outside ground areas). Brick debris sprites are transparent.
+immediate operand or table byte in that object's drawing routine (Table~\ref{tab:changes}). The
+fireball now uses the player's palette (index~3), coins popping out of blocks use palette~3
+(index~3), the bumped brick uses palette~2 (index~3, terrain colour, as no sprite palette has a
+slot left for the brick grey), the bumped question block always uses palette~3 (the original used
+palette~1 outside ground areas), the vine uses palette~2 (index~3, terrain: it is a climbable
+solid), and floating score numbers use palette~3 (index~3, coin colour). The fire flower and the
+star use the player's palette (index~3, the fire-player pink, and index~2, cyan), and the routine
+that cycles their top row through the four palettes every two frames now always selects
+palette~0. The 1-up and the super mushroom share their tiles and are told apart by the game with
+the palette alone (1 versus 2), so index~1 of palette~1 is a dedicated 1-up colour. Brick debris
+sprites are transparent.
+
+\subsection{Sprite rectangles fit the collision box}
+\label{sec:hitbox}
+
+\textit{Super Mario Bros.} does not derive collisions from the art. For every sprite object the
+game computes a collision box as the object's relative screen position plus one of 12 four-byte
+entries (left, top, right and bottom offsets) of a table in PRG-ROM, selected by a per-object
+control byte set at initialisation (small, big and crouching player; ``tall'' and ``small''
+enemies; fireball; hammer; Bowser's flame; Bowser; three sizes of lift). The boxes live in RAM
+(\hex{04AC}--\hex{04DB}), and the sprite--sprite collision routine compares them with inclusive
+edges. The tiles of the same object are drawn at fixed offsets from the same position, in one to
+three rows of two $8\times8$ tiles. For each tile there is therefore a fixed set of pixels that
+lie inside the box, and the tile can be \emph{carved} to those pixels: opaque inside the box,
+transparent outside.
+
+The geometry was measured rather than transcribed from the disassembly. The same 66 recordings
+were replayed on the original ROM while reading, every second frame, the sprite list, the
+object-to-sprite offset tables and the live boxes, recording for each drawn tile the owner object
+and state, the tile's offset from the top-left corner of the owner's box, and the box size, with
+the sprite's horizontal and vertical flip bits folded back into tile space (the game mirrors the
+right-hand copy of symmetric tiles with the flip bit, so a tile used on both sides of an object is
+consistent once flips are folded). Objects whose state disables collisions (defeated enemies
+falling off screen, squished Goombas) and the frames of the grow and shrink animations were
+excluded. The dominant geometry per tile is a 182-entry table in the generator; the tiles that
+never occur in the dataset (swimming player, Bloober) were placed from the graphics tables, and
+castle objects (Bowser, Podoboo, flames, fire bars) were left as full squares. Table~\ref{tab:boxes}
+gives the resulting box sizes next to the size of the drawn sprite. For every object of its first
+four rows the box lies inside the drawn sprite, so the carve is exact; the exceptions are listed
+in Section~\ref{sec:verification}. We used the exclusive convention (a box of width
+$\mathit{right}-\mathit{left}$), which yields the familiar sizes; because the game compares edges
+inclusively, two boxes also register a collision when they merely touch, i.e.\ the effective box
+is one pixel larger on each side than drawn. The player's collisions with the \emph{terrain} are
+not box-based at all: the game probes points at $x+2$ and $x+13$ and, vertically, at $y+4$ (big)
+or $y+18$ (small) for the head and $y+32$ for the feet, so the terrain-relevant region is a few
+pixels larger than the enemy box.
+
+\begin{table}[t]
+  \caption{Collision boxes of the sprite objects that occur in the dataset, and the size of the
+  original drawing. Every simplified object is drawn as its box.}
+  \centering
+  \small
+  \begin{tabular}{lll}
+    \toprule
+    Object & Collision box (px) & Drawn sprite (px) \\
+    \midrule
+    Mario big / small / crouching & $12\times24$ / $10\times12$ / $12\times12$ & $16\times32$ / $16\times16$ / $16\times16$ \\
+    Goomba, Piranha Plant, Cheep-cheep, Bullet Bill, Spiny and egg & $10\times6$ & $16\times16$ or $16\times24$ \\
+    Koopas, Paratroopas, Buzzy Beetle, shells, Lakitu, power-ups & $12\times12$ & $16\times24$ or $16\times16$ \\
+    Fireball, hammer & $8\times8$ & $8\times8$, $8\times16$ \\
+    Hammer Bro & $8\times24$ & $16\times24$ \\
+    Lifts & $24$, $32$ or $48\times13$ & same width $\times\,8$ \\
+    \bottomrule
+  \end{tabular}
+  \label{tab:boxes}
+\end{table}
+
+The visual consequence is that objects become noticeably smaller than their sprites: a Goomba is
+a $10\times6$ sliver at the bottom of its former $16\times16$ body, and small Mario a
+$10\times12$ block whose top is 4~px below the top of his head (Figure~\ref{fig:hitbox}). This is
+faithful to what the game reacts to and is the purpose of the change; the generator can also
+produce full-size squares.
+
+\subsection{Shape cues for game state}
+\label{sec:shapes}
+
+Colour identifies the category of an object; a few states that matter for play are conveyed in
+the original only by drawings. We surveyed every such distinction (Table~\ref{tab:semantics}) and,
+where colour slots were exhausted, encoded it with a simple shape drawn within the same rectangle
+(Table~\ref{tab:shapes}, Figure~\ref{fig:cues}). The player's facing direction is a $2\times2$
+transparent hole 2~px in from the front edge and 2~px below the top of the box: the tiles are drawn
+facing right and the game sets the horizontal-flip bit when he faces left, so the hole moves with
+him. Koopa and Buzzy shells and the player's death pose are hollow (a 2-px ring), i.e.\ ``an empty
+or inert body''. The Spiny, its egg and the Piranha Plant, the enemies that hurt when stomped, have
+a toothed top edge. The two Paratroopa wing tiles, which sit in the row above the box, carry an
+$8\times2$ bar 1~px above the box; it is the only opaque pixel drawn outside a collision box, and
+it is on one side of the enemy only because the other tile of that row is the Koopa head shared
+with the walking Koopa. The squished Goomba, which has no collision, is a $16\times4$ bar on the
+ground, and the springboard, which the game handles by position rather than by a sprite box, is
+striped.
+
+\begin{table}[t]
+  \caption{Shape cues of the simplified game.}
+  \centering
+  \small
+  \begin{tabular}{lp{9.5cm}}
+    \toprule
+    Shape & Meaning \\
+    \midrule
+    rectangle size & the object's collision box (Table~\ref{tab:boxes}) \\
+    $2\times2$ hole near the top edge of the player & the side the player faces \\
+    hollow rectangle & a Koopa or Buzzy shell (kickable), or the player dying \\
+    toothed top edge & an enemy that cannot be stomped (Spiny, Spiny egg, Piranha Plant) \\
+    $8\times2$ bar just above an enemy & a Paratroopa (winged; needs two stomps) \\
+    $16\times4$ bar on the ground & a squished Goomba (harmless, about to vanish) \\
+    horizontal stripes & the springboard \\
+    \bottomrule
+  \end{tabular}
+  \label{tab:shapes}
+\end{table}
+
+\begin{table}[t]
+  \caption{Inventory of the semantic information a player uses, how the original game shows it,
+  and what the simplified game does with it. ``Kept'': the cue survives unchanged; ``added'': a
+  colour or shape was introduced; ``lost'': not visible.}
+  \centering
+  \scriptsize
+  \begin{tabular}{p{3.6cm}p{3.1cm}p{7.6cm}}
+    \toprule
+    Information & Original cue & Simplified game \\
+    \midrule
+    \multicolumn{3}{l}{\textit{Player}} \\
+    small / big / crouching & sprite size and pose & kept: box $10\times12$ / $12\times24$ / $12\times12$ \\
+    fire state & palette & kept: pale pink \\
+    star invincibility & palette flashing & kept: the game rotates the palette attribute \\
+    hurt invulnerability & blinking & kept: the game skips drawing every other frame \\
+    facing direction & drawing & added: hole on the front side \\
+    dying & death pose, then falling & added: hollow rectangle, plus the fall \\
+    walking / jumping / skidding / climbing pose & animation frames & lost: frames share tiles, no colour slot; redundant with motion \\
+    grow / shrink animation & frames alternate size & kept; box and rectangle disagree during the freeze \\
+    fireballs & drawing & kept: $8\times8$ pink, the exact box \\
+    \midrule
+    \multicolumn{3}{l}{\textit{Enemies}} \\
+    enemy vs.\ anything else & drawing & kept: red \\
+    species & drawing & lost by design; partly recoverable from box size and behaviour \\
+    cannot be stomped (Spiny, egg, Piranha) & spikes, teeth & added: toothed top edge \\
+    winged (Paratroopa) & wings & added: wing bar \\
+    red vs.\ green Koopa (turns at ledges) & palette & lost: same tiles, palettes shared with other enemies; visible from behaviour \\
+    immune to fireballs (Buzzy Beetle) & drawing & lost: no free colour slot in its palette \\
+    shell (kickable) & shell drawing & added: hollow rectangle \\
+    moving vs.\ resting shell & motion & kept \\
+    squished Goomba (harmless) & flat drawing & added: flat bar \\
+    killed by fireball, shell or star & drawn upside down, falls & kept: rectangle mirrored in the sprite frame, falls \\
+    hammers, bullets & drawing & kept: red \\
+    Piranha inside its pipe & hidden behind pipe & kept (priority bit) \\
+    enemy facing direction; Lakitu's cloud & drawing & lost (motion); removed (decoration) \\
+    \midrule
+    \multicolumn{3}{l}{\textit{Items and blocks}} \\
+    super mushroom vs.\ 1-up & palette & added: green vs.\ dark green \\
+    fire flower; star & drawing, flashing & added: pink; cyan (flashing removed) \\
+    coins & drawing & kept: yellow \\
+    ?-block vs.\ used block; brick vs.\ hard block & drawing & kept: orange (flashing) vs.\ brown; grey vs.\ brown \\
+    content of blocks, hidden blocks, enterable pipes & invisible in the original & same as original \\
+    vine (climbable); springboard & drawing & added: terrain brown; stripes \\
+    lifts & drawing, motion & kept: brown bars, motion \\
+    Bullet Bill cannon & drawing & lost as a danger source: solid terrain, drawn as such \\
+    flagpole, flag, axe; castle & drawing & kept: purple; removed (decoration) \\
+    area theme & palettes, decoration & removed by design \\
+    \midrule
+    \multicolumn{3}{l}{\textit{Events and HUD}} \\
+    points earned & floating numbers & kept, in coin yellow (flagpole score in purple) \\
+    coin collected, block bumped & sprite animations & kept \\
+    brick shattered; level completed & debris; fireworks, castle flag & lost: decoration, transparent \\
+    score, coins, world, time, lives & HUD text & kept \\
+    \bottomrule
+  \end{tabular}
+  \label{tab:semantics}
+\end{table}
 
 \subsection{Palettes}
 \label{sec:palettes}
@@ -266,7 +437,7 @@ rewriting background palette~3 every 8 frames. All of these were overwritten so 
 palette index means the same category everywhere (Table~\ref{tab:palettes}). The backdrop is
 sky blue in every area, including underground and night levels. The fire-player colour
 (\hex{36}, a pale pink) was chosen close to the player's white so that the change of state is
-visible while keeping the object in the ``player'' family; fireballs share it.
+visible while keeping the object in the ``player'' family; fireballs and the fire flower share it.
 
 \begin{table}[t]
   \caption{Meaning of each palette index after the modification. BG: background palettes; SPR:
@@ -277,8 +448,8 @@ visible while keeping the object in the ``player'' family; fireballs share it.
     \toprule
     index & BG0 & BG1 & BG2 & BG3 & SPR0 & SPR1 & SPR2 & SPR3 \\
     \midrule
-    1 & item & brick & text (white) & ?-block & player & item & item & ?-block \\
-    2 & terrain & terrain & terrain & terrain & item & enemy & enemy & enemy \\
+    1 & item & brick & text (white) & ?-block & player & 1-up & item & ?-block \\
+    2 & terrain & terrain & terrain & terrain & star & enemy & enemy & enemy \\
     3 & goal & goal & goal & coin & fire player & goal & terrain & coin \\
     \bottomrule
   \end{tabular}
@@ -289,7 +460,7 @@ visible while keeping the object in the ``player'' family; fireballs share it.
 \label{sec:changes}
 
 Table~\ref{tab:changes} summarises the bytes that differ between the original and the simplified
-cartridge image. No byte of program code or level data is changed; the 194 modified PRG-ROM bytes
+cartridge image. No byte of program code or level data is changed; the 199 modified PRG-ROM bytes
 are all data that the game copies into the PPU write buffer or the sprite list.
 
 \begin{table}[t]
@@ -303,10 +474,11 @@ are all data that the game copies into the PPU write buffer or the sprite list.
     \midrule
     iNES header & 0 & -- \\
     PRG-ROM: code and level data & 0 & -- \\
-    PRG-ROM: palette tables & 158 & four area palette sets, snow and mushroom variants, Bowser palette, player palette rows, backdrop table, question-block/coin animation tables \\
+    PRG-ROM: palette tables & 156 & four area palette sets, snow and mushroom variants, Bowser palette, player palette rows, backdrop table, question-block/coin animation tables \\
     PRG-ROM: metatile graphics table & 32 & pipe shafts (4) and castle (28) \\
-    PRG-ROM: sprite-palette operands & 4 & fireball, block coin, bumped brick, bumped ?-block \\
-    CHR-ROM: tile shapes & 5{,}545 & 244 sprite tiles and 96 background tiles rewritten \\
+    PRG-ROM: object graphics tables & 4 & power-up attribute table (2), Bloober frame 2 top row (2) \\
+    PRG-ROM: sprite-palette operands & 7 & fireball, block coin, bumped brick, bumped ?-block, vine, score numbers, flower/star palette cycling \\
+    CHR-ROM: tile shapes & 5{,}520 & 244 sprite tiles and 96 background tiles rewritten \\
     \bottomrule
   \end{tabular}
   \label{tab:changes}
@@ -319,9 +491,10 @@ The simplified cartridge is generated deterministically from the original by a s
 (\texttt{code/simplify\_rom.py}) that contains the tile classification, the colour table and the
 list of PRG patches; every PRG patch asserts the original bytes before writing. The input is the
 original ROM of the \textit{mario} stimulus set (MD5 \texttt{811b027e\ldots}); the output has MD5
-\texttt{6d5c5d99\ldots}. Two companion tools reproduce the sprite survey
-(\texttt{survey\_sprite\_tiles.py}) and the verification of Section~\ref{sec:verification}
-(\texttt{verify\_replays.py}). The stimulus is distributed as a drop-in replacement of the
+\texttt{f80e6aa2\ldots}. Companion tools reproduce the sprite survey
+(\texttt{survey\_sprite\_tiles.py}), the collision-box survey (\texttt{hitbox\_survey.py}), the
+verification of Section~\ref{sec:verification} (\texttt{verify\_replays.py}) and the palette
+rewrite of savestates (\texttt{fix\_state\_palette.py}). The stimulus is distributed as a drop-in replacement of the
 \textit{mario} stimulus set: same savestates, scenario and RAM-variable map, different
 \texttt{rom.nes}.
 
@@ -340,10 +513,28 @@ that the run continues identically. The same procedure applied to a graphics-onl
 changes without any PRG patch) must yield byte-identical RAM on every frame, which tests the
 emulator side of the argument.
 
-\TODO{decide on the final verification set: currently six recordings (levels 1-1 with fire
-Mario, star power and a completed level; 1-2; 1-3; 3-1; 4-2; 8-2; 2{,}800--6{,}000 frames each)
-plus all 24 level savestates with scripted input. Consider running the full dataset (all
-$\sim$3{,}400 recordings) and reporting the count.}
+The verification set is seven recordings (levels 1-1 with fire Mario, star power and a completed
+level; 1-2; 1-3; 3-1; 4-2; 5-1; 8-2; 1{,}900--6{,}000 frames each) plus the 26 loadable level
+savestates of the stimulus set played for 600 frames with scripted input (run right, jump
+periodically). \TODO{consider running the full dataset (3{,}374 recordings) and reporting the
+count.}
+
+Two properties of the recordings matter for rendering them on the simplified ROM. First, a
+recording's initial savestate carries the PPU palette of the moment it was captured, i.e.\ the
+original colours, and the game rewrites palettes only when an area loads. 3{,}231 of the 3{,}374
+recordings start on the black ``WORLD x-y'' screen, so the level palette is written about 120
+frames later; 143 (79 of them the first repetition of a run) start in gameplay and would keep the
+original colours until the next area change. A companion tool rewrites the 32 palette bytes inside
+the initial state; the run is RAM-identical afterwards. Second, where a collision box sticks out of
+the drawn sprite, the missing pixels are not drawn, because that would require additional sprite
+entries: Hammer Bro's box extends 4~px below his feet, lifts have a 5-px landing-tolerance zone
+under the bar, a hammer's $8\times8$ box is offset 4~px from its tile so half of it is undrawable,
+a resting shell has a 1-px strip of box above it, and Bowser has a box on his front half only.
+Smaller residuals: the cannon-fired Bullet Bill is drawn 1~px higher than the frenzy variant
+relative to its box; the Spiny egg alternates two frames drawn 2~px apart; Lakitu's box control
+byte switches to the $4\times4$ flame entry in about 12\% of his frames; and in about 3\% of frames
+the box lags the sprite by 1~px because the game computes it before the final position update of
+the frame.
 
 \subsection{Characterisation of the visual change}
 \label{sec:imagestats}
@@ -383,9 +574,10 @@ the other; compare agent and human behaviour under both versions.}
 Figure~\ref{fig:compare} shows matched frames of the two versions, and
 Figure~\ref{fig:levels} the first screen of every level after 7~s of scripted play. Decorative
 elements are absent, terrain and blocks are flat, and objects of the same category share a colour
-across day, night and underground levels. \TODO{add one or two sentences describing what a naive
-observer sees, and the object-size cue that replaces shape (a Goomba and small Mario are both
-$16\times16$; a Koopa is $16\times24$; big Mario $16\times32$).}
+across day, night and underground levels. Figure~\ref{fig:hitbox} overlays the collision boxes
+read from RAM on original frames next to the simplified rendering of the same frames, and
+Figure~\ref{fig:cues} shows the shape and colour cues of Section~\ref{sec:shapes}. \TODO{add one
+or two sentences describing what a naive observer sees.}
 
 \begin{figure}[t]
   \centering
@@ -399,10 +591,30 @@ $16\times16$; a Koopa is $16\times24$; big Mario $16\times32$).}
 
 \begin{figure}[t]
   \centering
+  \includegraphics[width=0.9\textwidth]{hitbox_original_vs_simplified.png}
+  \caption{Collision boxes. Left: frames of a participant recording in level 1-1 on the original
+  game, with the collision boxes read from RAM (\hex{04AC}--\hex{04DB}) at the same frame drawn in
+  magenta (boxes of inactive object slots are stale and also drawn). Right: the simplified rendering
+  of the same frames; every moving object is exactly its box. \TODO{crop, label panels.}}
+  \label{fig:hitbox}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.9\textwidth]{cues_original_vs_simplified.png}
+  \caption{Colour and shape cues, original (left of each pair) and simplified (right): the toothed
+  Piranha Plant, the Paratroopa's wing bar, the hollow dying player and shell, the Goomba's
+  $10\times6$ box and the player's facing hole, and the four power-ups in their own colours, plus the
+  striped springboard. \TODO{tighter crops, panel labels.}}
+  \label{fig:cues}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
   \includegraphics[width=0.8\textwidth]{tilesheet_original_vs_simplified.png}
   \caption{The complete CHR-ROM tile sheet before (left) and after (right) the modification.
-  Top half: 256 sprite tiles; bottom half: 256 background tiles. Palette index 0 is shown in blue,
-  indices 1--3 in greys. \TODO{annotate categories.}}
+  Top half: 256 sprite tiles, carved to their collision boxes; bottom half: 256 background tiles.
+  Palette index 0 is shown in blue, indices 1--3 in greys. \TODO{annotate categories.}}
   \label{fig:tilesheet}
 \end{figure}
 
@@ -417,13 +629,15 @@ $16\times16$; a Koopa is $16\times24$; big Mario $16\times32$).}
 
 \subsection{Logical identity}
 
-\TODO{turn into a table.} On the six recordings tested, the graphics-only build produced
-byte-identical RAM on every frame. With the palette, metatile and sprite-palette patches, the
-only RAM bytes that ever differed lay in the three presentation regions listed in
+\TODO{turn into a table.} On the seven recordings tested, the graphics-only build produced
+byte-identical RAM on every frame. With the palette, metatile, graphics-table and sprite-palette
+patches, the only RAM bytes that ever differed lay in the three presentation regions listed in
 Section~\ref{sec:verification} (\hex{0004}, \hex{0200}--\hex{02FF} and \hex{0304}--\hex{03B0}),
 on the frames where a screen column, a palette or an affected sprite was queued; no byte outside
-these regions differed on any frame, and savestates taken on either ROM loaded on the other and
-tracked the original run to its end. Consequently every RAM-derived variable of the stimulus set
+these regions differed on any frame (in particular the collision boxes at \hex{04AC}--\hex{04DB}
+were identical), savestates taken on either ROM loaded on the other and tracked the original run
+to its end, and the 26 level savestates played with scripted input gave identical RAM outside the
+same three regions. Consequently every RAM-derived variable of the stimulus set
 (positions, score, coins, lives, enemy and power-up states) is identical between versions for a
 given input sequence, and the 3{,}374 recordings of the \textit{mario} dataset can be rendered in
 either version without conversion. \TODO{confirm the recording count from the dataset paper.}
@@ -442,16 +656,22 @@ colour count and spectral slope for original / simplified / \textit{mariostars} 
 comparisons in the CNeuroMod cohort; a free semantic segmentation of every frame; a testbed for
 the visual abstraction question in RL.}
 
-\TODO{Design decisions and their rationale: colour as the only category cue; shape removed but
-size retained; why the backdrop is uniform even underground; why bumped bricks are brown; why the
-castle is removed; why star power still flashes.}
+\TODO{Design decisions and their rationale: colour as the category cue; drawings replaced by
+the collision box, so objects shrink to what the game reacts to (a design choice that trades the
+familiar silhouette for a faithful one; the generator can produce full squares); the small set of
+shape cues and why each was needed (Table~\ref{tab:semantics}); what was deliberately not
+encoded (species, red vs.\ green Koopa, Buzzy's fireball immunity, pose); why the backdrop is
+uniform even underground; why bumped bricks are brown; why the castle is removed; why star power
+still flashes while the star item does not.}
 
 \TODO{Generality of the method: applies to any NES title (and, with the same logic, to other
 tile-based consoles) provided the metatile/graphics tables can be located; the verification
-protocol is game-agnostic. Limitations: shape information is lost entirely; objects that never
-appear in the recorded levels default to the enemy colour; the HUD keeps the original font;
-mid-level savestates keep the original palette until the next area load (a tool is provided to
-rewrite them).}
+protocol is game-agnostic. Limitations: pose information is lost; boxes that stick out of the
+drawn sprite cannot be completed without code changes (Section~\ref{sec:verification}); objects
+that never appear in the recorded levels were placed from the graphics tables without replay
+verification; the HUD keeps the original font; recordings that start mid-level keep the original
+palette until the next area load unless their initial state is rewritten (4\% of the dataset; a
+tool is provided).}
 
 \TODO{Relation to prior work on abstracted game stimuli and on visual clutter in perception.}
 

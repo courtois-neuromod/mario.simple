@@ -5,28 +5,46 @@ Design
 ------
 * Anything the player cannot interact with (clouds, bushes, hills, trees,
   fences, castle decoration, water surface, sea plants, ropes, fireworks,
-  brick debris...) becomes transparent, i.e. shows the uniform backdrop.
-* Everything the player interacts with becomes a flat square, and colour is a
-  semantic category, identical in every level:
+  brick debris, Lakitu's cloud, Paratroopa wings...) becomes transparent,
+  i.e. shows the uniform backdrop.
+* Every background object the player interacts with becomes a flat square,
+  and every sprite object becomes a flat rectangle the exact size and
+  position of its collision box (the game computes that box from the
+  object's position plus a 4-byte offset entry, so it never depends on the
+  art; see HITBOX below).  Colour is a semantic category, identical in every
+  level:
 
-      backdrop   sky blue   everything non-interactive
-      terrain    brown      ground, stairs, hard blocks, pipes, tree/mushroom
-                            ledges, cloud terrain, cannons, bridges, used
-                            blocks, moving platforms, springboards, vines
-      brick      grey       breakable bricks
-      ?-block    orange     question blocks (and the sprite of a bumped block)
-      coin       yellow     coins in the level and coins popping out of blocks
-      item       green      mushroom, 1-up, fire flower, star, vine
-      enemy      red        every enemy and enemy projectile
-      Mario      white      the player (flashes white/green/orange when
-                            invincible)
-      fire Mario pale pink  Mario after a fire flower, and his fireballs
-      goal       purple     flagpole, ball and flag, axe
+      backdrop   sky blue    everything non-interactive
+      terrain    brown       ground, stairs, hard blocks, pipes, tree/mushroom
+                             ledges, cloud terrain, cannons, bridges, used
+                             blocks, moving platforms, springboards, vines
+      brick      grey        breakable bricks
+      ?-block    orange      question blocks (and the sprite of a bumped block)
+      coin       yellow      coins in the level, coins popping out of blocks,
+                             floating score numbers
+      item       green       super mushroom
+      1-up       dark green  1-up mushroom
+      star       cyan        starman
+      enemy      red         every enemy and enemy projectile
+      Mario      white       the player (flashes white/green/orange when
+                             invincible)
+      fire Mario pale pink   Mario after a fire flower, his fireballs, and
+                             the fire flower itself
+      goal       purple      flagpole, ball and flag, axe, flagpole score
+
+* A few *shapes* carry state that colour cannot (see the sets after HITBOX):
+      Mario has a 2x2 "eye" hole on the side he faces;
+      Koopa/Buzzy shells and dying Mario are hollow (2-px ring);
+      Spiny, Spiny eggs and Piranha Plants (cannot be stomped) have a
+      toothed top edge;
+      a Paratroopa carries a 8x2 wing bar just above its box;
+      a squished Goomba is a 16x4 bar, the springboard is striped.
 
 How the ROM is changed
 ----------------------
 * CHR-ROM (tile graphics) is rewritten from the tables below.
-* PRG-ROM: only *presentation data* is patched, never code or level data:
+* PRG-ROM: only *presentation data* is patched, never code paths or level
+  data:
     - the 4 area palette sets, the day/night snow and mushroom palette
       variants, the Bowser palette, the player palette rows, the
       backdrop-colour table, and the palette-3 rotation tables the game uses
@@ -36,14 +54,19 @@ How the ROM is changed
       sharing tile $26 with the (transparent) hills, and 28 bytes of it so the
       end-of-level castle (decoration) is drawn with blank tiles instead of
       brick tiles;
-    - 4 immediate operands that choose the sprite palette of fireballs, coins
-      popping out of blocks and bumped blocks (--no-pipes disables these too).
+    - 2 bytes of the enemy graphics table (Bloober frame 2) and the 4-byte
+      power-up attribute table;
+    - 7 immediate operands that choose the sprite palette of fireballs, coins
+      popping out of blocks, bumped blocks, vines, floating score numbers,
+      and that stop the fire flower / star palette cycling.
   These bytes only feed the PPU write buffer ($0300-$03FF) and the sprite
   buffer ($0200-$02FF), which game logic never reads.  RAM outside those two
   buffers, .bk2 replays and savestates therefore stay identical to the
-  original ROM (verified on participant replays).
+  original ROM (verified on participant replays, see verify_replays.py).
 
-Usage: simplify_rom.py ORIGINAL.nes OUTPUT.nes [--no-pipes] [--no-palette]
+Usage: simplify_rom.py ORIGINAL.nes OUTPUT.nes [--no-hitbox] [--no-marks] [--no-pipes] [--no-palette]
+  --no-hitbox : draw every sprite tile as a full 8x8 square (v5 look)
+  --no-marks  : no eye / hollow / teeth / wing / stripe shapes
 """
 import sys, hashlib
 
@@ -51,7 +74,8 @@ import sys, hashlib
 # NES master-palette indices.  Change these to retune the look.
 C = dict(
     backdrop=0x22, terrain=0x17, brick=0x10, qblock=0x27, coin=0x28,
-    item=0x2A, enemy=0x16, mario=0x30, mario_fire=0x36, goal=0x24, text=0x30,
+    item=0x2A, oneup=0x1A, star=0x2C, enemy=0x16, mario=0x30, mario_fire=0x36,
+    goal=0x24, text=0x30,
 )
 
 # Each palette group holds 3 usable colours (index 1..3).  The tile tables
@@ -63,15 +87,15 @@ BG_PAL = [
     [C['backdrop'], C['qblock'], C['terrain'], C['coin']],   # BG3: ?-blocks, used blocks, coins
 ]
 SPR_PAL = [
-    [C['backdrop'], C['mario'],  C['item'],    C['mario_fire']],  # SPR0: Mario, fire flower, fireballs (overridden by PLAYER_PAL)
-    [C['backdrop'], C['item'],   C['enemy'],   C['goal']],   # SPR1: koopas, hammer bros, piranha, flag, vine, 1-up
-    [C['backdrop'], C['item'],   C['enemy'],   C['terrain']],# SPR2: spiny, cheeps, mushroom, star, coins, platforms
-    [C['backdrop'], C['qblock'], C['enemy'],   C['coin']],   # SPR3: goomba, buzzy, bullet bill, hammers, bumped ?-block, coins
+    [C['backdrop'], C['mario'],  C['star'],    C['mario_fire']],  # SPR0: Mario, star, fire flower, fireballs (overridden by PLAYER_PAL)
+    [C['backdrop'], C['oneup'],  C['enemy'],   C['goal']],   # SPR1: koopas, hammer bros, piranha, lakitu, flag, 1-up, flagpole score
+    [C['backdrop'], C['item'],   C['enemy'],   C['terrain']],# SPR2: spiny, cheeps, red koopas, mushroom, platforms, vine, bumped brick
+    [C['backdrop'], C['qblock'], C['enemy'],   C['coin']],   # SPR3: goomba, buzzy, bullet bill, hammers, bumped ?-block, coins, score numbers
 ]
 PLAYER_PAL = [                      # rows used by the game: Mario / Luigi / fire Mario
-    [C['backdrop'], C['mario'],      C['item'], C['mario_fire']],
-    [C['backdrop'], C['mario'],      C['item'], C['mario_fire']],
-    [C['backdrop'], C['mario_fire'], C['item'], C['mario_fire']],
+    [C['backdrop'], C['mario'],      C['star'], C['mario_fire']],
+    [C['backdrop'], C['mario'],      C['star'], C['mario_fire']],
+    [C['backdrop'], C['mario_fire'], C['star'], C['mario_fire']],
 ]
 # Star power makes the game cycle Mario's sprite through the 4 sprite palettes
 # (it rotates the attribute bits, not the colours).  Mario's tiles use index 1
@@ -122,8 +146,10 @@ SPR = {i: 2 for i in range(0x00, 0xF6)}            # default: enemy colour index
 def _spr(ids, v):
     for i in ids: SPR[i] = v
 _spr(list(range(0x00, 0x50)) + list(range(0x58, 0x60)) + list(range(0x90, 0x94)) + [0x9E, 0x9F], 1)  # Mario (SPR0 idx1)
-_spr(list(range(0x76, 0x7A)) + [0x8D, 0xE4, 0xD8, 0xD9, 0xE0, 0xE1], 1)                           # mushroom/1-up, star, flower, vine (item)
-_spr([0xD6, 0xD7], 2)                              # fire flower tiles drawn with Mario's palette (SPR0 idx2 = item)
+_spr(list(range(0x76, 0x7A)), 1)                   # mushroom (SPR2 idx1 = item) / 1-up (SPR1 idx1 = 1-up colour)
+_spr([0x8D, 0xE4], 2)                              # star (moved to SPR0 idx2 = star colour)
+_spr([0xD6, 0xD9], 3)                              # fire flower (moved to SPR0 idx3 = fire-Mario colour)
+_spr([0xE0, 0xE1], 3)                              # vine (moved to SPR2 idx3 = terrain)
 _spr(list(range(0x60, 0x64)), 3)                   # coin popping out of a block (moved to SPR3 idx3 = coin)
 _spr([0x64, 0x65], 3)                              # Mario's fireball (moved to SPR0 idx3 = fire-Mario colour)
 _spr([0x87], 1)                                    # bumped ?-block sprite (SPR3 idx1 = ?-block)
@@ -132,7 +158,86 @@ _spr([0x84], 0)                                    # brick debris: transparent
 _spr([0x5B, 0x75] + list(range(0xF0, 0xF4)), 3)    # moving platforms, springboard (SPR2 idx3 = terrain)
 _spr([0x50, 0x7E, 0x7F], 3)                        # flagpole flag (SPR1 idx3 = goal)
 _spr([0x66, 0x67, 0x68, 0x54, 0x55, 0x56, 0x57], 0)  # fireworks, castle flag: transparent
-# $F6-$FF: floating score digits and "1UP", kept as drawn
+_spr(list(range(0xF6, 0xFC)) + [0xFD, 0xFE], 'text3')  # floating score digits and "1UP": glyph kept, index 3 (moved to SPR3 = coin colour)
+
+# ------------------------------------------------- collision-box geometry --
+# tile: (dx, dy, w, h).  The game computes an object's collision box as its
+# screen position plus one of 12 four-byte offset entries (BoundBoxCtrlData),
+# and draws its tiles at fixed offsets from the same position.  (dx, dy) is
+# the position of the tile's top-left pixel relative to the top-left corner of
+# the box and (w, h) the box size (right/bottom edges exclusive); a tile then
+# only keeps the pixels that fall inside the box.  Measured on 66 participant
+# replays by reading the live boxes at $04AC-$04DB together with the sprite
+# buffer (code/hitbox_survey.py); horizontal/vertical flips folded.  Tiles
+# not listed keep their full 8x8 square.
+HITBOX = {
+# Koopa (12x12 box; rows -9/-1/7); shells 6E,6F
+    0x6E:(-2,-5,12,12), 0x6F:(-2,3,12,12), 0xA0:(6,-9,12,12), 0xA1:(-2,-1,12,12), 0xA2:(6,-1,12,12), 0xA3:(-2,7,12,12),
+    0xA4:(6,7,12,12), 0xA5:(6,-9,12,12), 0xA6:(-2,-1,12,12), 0xA7:(6,-1,12,12), 0xA8:(-2,7,12,12), 0xA9:(6,7,12,12),
+# Buzzy Beetle and its shell
+    0xAA:(-2,-1,12,12), 0xAB:(6,-1,12,12), 0xAC:(-2,7,12,12), 0xAD:(6,7,12,12), 0xAE:(-2,-1,12,12), 0xAF:(6,-1,12,12),
+    0xB0:(-2,7,12,12), 0xB1:(6,7,12,12), 0xF4:(-2,3,12,12), 0xF5:(-2,-5,12,12),
+# red Koopa shell
+    0x6D:(-2,-5,12,12),
+# Hammer Bro (8x24 box; rows -4/4/12)
+    0x7C:(4,-4,8,24), 0x7D:(-4,-4,8,24), 0x88:(4,4,8,24), 0x89:(-4,4,8,24), 0x8A:(4,12,8,24), 0x8B:(-4,12,8,24),
+    0x8C:(4,4,8,24), 0xD1:(-4,4,8,24), 0xD2:(4,12,8,24), 0xD3:(-4,12,8,24), 0xD4:(4,-4,8,24), 0xD5:(-4,-4,8,24),
+    0xE2:(4,4,8,24), 0xE3:(-4,4,8,24),
+# Goomba (10x6 box; rows -6/2)
+    0x70:(-3,-6,10,6), 0x71:(5,-6,10,6), 0x72:(-3,2,10,6), 0x73:(5,2,10,6),
+# Piranha Plant (10x6 box; rows -14/-6/2)
+    0xE5:(-3,-14,10,6), 0xE6:(-3,-6,10,6), 0xEB:(-3,2,10,6), 0xEC:(-3,-14,10,6), 0xED:(-3,-6,10,6), 0xEE:(-3,2,10,6),
+# Paratroopa wing tiles
+    0x69:(-2,-9,12,12), 0x6A:(-2,-1,12,12), 0x6B:(-2,-9,12,12), 0x6C:(-2,-1,12,12),
+# Lakitu (12x12)
+    0xB8:(6,-9,12,12), 0xB9:(-2,-9,12,12), 0xBA:(6,-1,12,12), 0xBB:(-2,-1,12,12), 0xBC:(-2,7,12,12), 0xBD:(-2,-1,12,12),
+# Spiny and Spiny egg (10x6)
+    0x8E:(-3,-4,10,6), 0x8F:(-3,2,10,6), 0x94:(-3,-4,10,6), 0x95:(-3,2,10,6), 0x96:(-3,-6,10,6), 0x97:(5,-6,10,6),
+    0x98:(-3,2,10,6), 0x99:(5,2,10,6), 0x9A:(-3,-6,10,6), 0x9B:(5,-6,10,6), 0x9C:(-3,2,10,6), 0x9D:(5,2,10,6),
+# Cheep-cheep (10x6)
+    0xB2:(-3,-6,10,6), 0xB3:(5,-6,10,6), 0xB4:(-3,2,10,6), 0xB5:(5,2,10,6), 0xB6:(-3,-6,10,6), 0xB7:(-3,2,10,6),
+# Bullet Bill (cannon variant; frenzy variant is drawn 1 px lower)
+    0xE7:(5,-6,10,6), 0xE8:(-3,-6,10,6), 0xE9:(5,2,10,6), 0xEA:(-3,2,10,6),
+# fireball (8x8)
+    0x64:(0,0,8,8), 0x65:(0,0,8,8),
+# big Mario (12x24 box, rows at -8/0/8/16)
+    0x00:(-2,-8,12,24), 0x01:(6,-8,12,24), 0x02:(-2,0,12,24), 0x03:(6,0,12,24), 0x04:(-2,8,12,24), 0x05:(6,8,12,24),
+    0x06:(-2,16,12,24), 0x07:(6,16,12,24), 0x08:(-2,-8,12,24), 0x09:(6,-8,12,24), 0x0A:(-2,0,12,24), 0x0B:(6,0,12,24),
+    0x0C:(-2,8,12,24), 0x0D:(6,8,12,24), 0x0E:(-2,16,12,24), 0x0F:(6,16,12,24), 0x10:(-2,-8,12,24), 0x11:(6,-8,12,24),
+    0x12:(-2,0,12,24), 0x13:(6,0,12,24), 0x14:(-2,8,12,24), 0x15:(6,8,12,24), 0x16:(-2,16,12,24), 0x17:(6,16,12,24),
+    0x18:(-2,-8,12,24), 0x19:(6,-8,12,24), 0x1A:(-2,0,12,24), 0x1B:(6,0,12,24), 0x1C:(-2,8,12,24), 0x1D:(6,8,12,24),
+    0x1E:(-2,16,12,24), 0x1F:(6,16,12,24), 0x20:(-2,-8,12,24), 0x21:(6,-8,12,24), 0x22:(-2,0,12,24), 0x23:(6,0,12,24),
+    0x24:(-2,8,12,24), 0x25:(6,8,12,24), 0x26:(-2,16,12,24), 0x27:(6,16,12,24), 0x28:(-2,0,12,24), 0x29:(6,0,12,24),
+    0x2A:(-2,8,12,24), 0x2B:(6,8,12,24), 0x4A:(-2,8,12,24), 0x4B:(-2,16,12,24), 0x4C:(-2,0,12,24), 0x4D:(6,0,12,24),
+    0x5C:(-2,16,12,24), 0x5D:(6,16,12,24), 0x5E:(-2,16,12,24), 0x5F:(6,16,12,24),
+# small Mario (10x12 box, rows at -4/4)
+    0x2C:(-3,4,10,12), 0x2D:(5,4,10,12), 0x32:(-3,-4,10,12), 0x33:(5,-4,10,12), 0x34:(-3,4,10,12), 0x35:(5,4,10,12),
+    0x36:(-3,-4,10,12), 0x37:(5,-4,10,12), 0x38:(-3,4,10,12), 0x39:(5,4,10,12), 0x3A:(-3,-4,10,12), 0x3B:(-3,4,10,12),
+    0x3C:(5,4,10,12), 0x3D:(-3,-4,10,12), 0x3E:(5,-4,10,12), 0x3F:(-3,4,10,12), 0x40:(5,4,10,12), 0x41:(5,-4,10,12),
+    0x42:(-3,4,10,12), 0x43:(5,4,10,12), 0x44:(-3,4,10,12), 0x45:(5,4,10,12), 0x4E:(-3,4,10,12), 0x4F:(-3,4,10,12),
+    0x90:(-3,4,10,12), 0x91:(5,4,10,12), 0x92:(-3,4,10,12), 0x93:(5,4,10,12), 0x9E:(-3,-4,10,12), 0x9F:(-3,4,10,12),
+# crouching Mario (12x12)
+    0x58:(-2,-4,12,12), 0x59:(6,-4,12,12), 0x5A:(-2,4,12,12),
+# hammers (8x8 box, tile offset 4px)
+    0x80:(4,0,8,8), 0x81:(-4,0,8,8), 0x82:(0,4,8,8), 0x83:(0,-4,8,8),
+# mushroom / 1-up (12x12; rows -1/7)
+    0x76:(-2,-1,12,12), 0x77:(6,-1,12,12), 0x78:(-2,7,12,12), 0x79:(6,7,12,12),
+# fire flower
+    0xD6:(-2,-1,12,12), 0xD9:(-2,7,12,12),
+# star
+    0x8D:(-2,-1,12,12), 0xE4:(-2,7,12,12),
+# not seen in the dataset, placed from the graphics tables (swimming Mario, Bloober)
+    0x2E:(-2,8,12,24), 0x2F:(6,8,12,24), 0x30:(6,8,12,24), 0x31:(-2,16,12,24),
+    0x46:(-3,4,10,12), 0x47:(5,4,10,12), 0x48:(-3,4,10,12), 0x49:(5,4,10,12),
+    0xDC:(-3,-6,10,6), 0xDD:(5,-6,10,6), 0xDE:(-3,2,10,6), 0xDF:(5,2,10,6),
+# squished Goomba: no collision; drawn as a 16x4 bar on the ground
+    0xEF:(0,-4,8,8),
+}
+MARIO_TILES = {t for t in HITBOX if t < 0x50 or 0x58 <= t < 0x60 or 0x90 <= t < 0x94 or t in (0x9E, 0x9F)}
+HOLLOW   = {0x6D, 0x6E, 0x6F, 0xF4, 0xF5, 0x9E, 0x9F}          # Koopa/Buzzy shells, dying Mario: 2-px ring
+SERRATED = set(range(0x96, 0x9E)) | {0x8E, 0x8F, 0x94, 0x95, 0xE5, 0xE6, 0xEB, 0xEC, 0xED, 0xEE}  # Spiny, egg, Piranha: toothed top edge
+WINGS    = {0x69, 0x6B}                                        # Paratroopa wing tiles (row above the box): 8x2 bar
+STRIPED  = set(range(0xF0, 0xF4))                              # springboard: 2-px horizontal stripes
 
 # ------------------------------------------------------ PRG data patches --
 HDR, PRG, CHR = 16, 0x8000, 0x2000
@@ -147,6 +252,11 @@ SPRITE_PATCHES = {  # file offset: (expected bytes, new bytes) - immediate opera
     0x66C1: (bytes([0xA9, 0x02, 0x99, 0x02, 0x02]),       bytes([0xA9, 0x03, 0x99, 0x02, 0x02])),        # coin from block: palette 2 -> 3
     0x6BEB: (bytes([0xA9, 0x03, 0x85, 0x04, 0x4A]),       bytes([0xA9, 0x02, 0x85, 0x04, 0x4A])),        # bumped brick: palette 3 -> 2
     0x6C2E: (bytes([0xF0, 0x01, 0x4A, 0xA6, 0x08]),       bytes([0xF0, 0x01, 0xEA, 0xA6, 0x08])),        # bumped ?-block: always palette 3 (was 1 outside ground areas)
+    0x66DE: (bytes([0x02, 0x01, 0x02, 0x01]),             bytes([0x02, 0x00, 0x00, 0x01])),              # PowerUpAttributes: mushroom 2, flower 1->0, star 2->0, 1-up 1
+    0x6724: (bytes([0x4A, 0x29, 0x03, 0x0D, 0xCA, 0x03]), bytes([0x4A, 0x29, 0x00, 0x0D, 0xCA, 0x03])),  # flower/star top row: stop cycling the 4 palettes, use palette 0
+    0x6471: (bytes([0xA9, 0x21, 0x99, 0x02, 0x02]),       bytes([0xA9, 0x22, 0x99, 0x02, 0x02])),        # vine: palette 1 -> 2 (behind-background bit kept)
+    0x055B: (bytes([0xA9, 0x02, 0x99, 0x02, 0x02, 0x99, 0x06, 0x02]), bytes([0xA9, 0x03, 0x99, 0x02, 0x02, 0x99, 0x06, 0x02])),  # floating score numbers: palette 2 -> 3
+    0x6790: (bytes([0xDC, 0xDC, 0xDD, 0xDD, 0xDE, 0xDE]), bytes([0xFC, 0xFC, 0xDD, 0xDD, 0xDE, 0xDE])),  # enemy graphics table, Bloober frame 2: blank top row (tile $DC is a body tile in frame 1)
 }
 AREA_PALETTES = [0x0CB4, 0x0CD8, 0x0CFC, 0x0D20]   # water, ground, underground, castle: "3F 00 20" + 32 bytes
 PLAYER_COLORS = 0x05E7                              # 3 rows x 4
@@ -168,15 +278,46 @@ def remap(tile, idx):
     hi = [m if idx & 2 else 0 for m in mask]
     return bytes(lo + hi)
 
+def pack(px):
+    lo = [sum(((px[r][c] & 1) << (7 - c)) for c in range(8)) for r in range(8)]
+    hi = [sum(((px[r][c] >> 1 & 1) << (7 - c)) for c in range(8)) for r in range(8)]
+    return bytes(lo + hi)
+
+def carve(t, idx, hitbox=True, marks=True):
+    """Sprite tile t in palette index idx, restricted to its collision box."""
+    g = HITBOX.get(t) if hitbox else None
+    if g is None and not (marks and t in STRIPED):
+        return solid(idx)
+    px = [[0]*8 for _ in range(8)]
+    if g is None:                                    # striped springboard
+        return pack([[idx if (r // 2) % 2 == 0 else 0]*8 for r in range(8)])
+    dx, dy, w, h = g
+    for r in range(8):
+        for c in range(8):
+            bx, by = dx + c, dy + r
+            if not (0 <= bx < w and 0 <= by < h): continue
+            v = idx
+            if marks:
+                if t in HOLLOW and 2 <= bx < w-2 and 2 <= by < h-2: v = 0
+                if t in SERRATED and by < 2 and (bx // 2) % 2: v = 0
+                if t in MARIO_TILES and t not in HOLLOW and w-4 <= bx < w-2 and 2 <= by < 4: v = 0
+            px[r][c] = v
+    if marks and t in WINGS:
+        for r in (6, 7): px[r] = [idx]*8
+    return pack(px)
+
 def _expect(rom, off, header):
     assert bytes(rom[off:off+len(header)]) == bytes(header), f"unexpected bytes at {off:#x}"
 
-def build(rom: bytes, patch_pipes=True, patch_palette=True) -> bytes:
+def build(rom: bytes, patch_pipes=True, patch_palette=True, hitbox=True, marks=True) -> bytes:
     assert len(rom) == HDR + PRG + CHR, "unexpected ROM size"
     rom = bytearray(rom)
     chr0 = HDR + PRG
     for t, v in SPR.items():
-        rom[chr0 + 16*t: chr0 + 16*t + 16] = solid(v) if v else bytes(16)
+        off = chr0 + 16*t
+        if v == 'text3':  rom[off:off+16] = remap(rom[off:off+16], 3)
+        elif v:           rom[off:off+16] = carve(t, v, hitbox, marks)
+        else:             rom[off:off+16] = bytes(16)
     for t, v in BG.items():
         off = chr0 + 0x1000 + 16*t
         if v is None:       rom[off:off+16] = bytes(16)
@@ -209,6 +350,7 @@ if __name__ == "__main__":
     rom = open(src, "rb").read()
     if hashlib.md5(rom).hexdigest() != ORIG_MD5:
         print("warning: input is not the original SMB ROM used by mario.stimuli", file=sys.stderr)
-    out = build(rom, patch_pipes="--no-pipes" not in sys.argv, patch_palette="--no-palette" not in sys.argv)
+    out = build(rom, patch_pipes="--no-pipes" not in sys.argv, patch_palette="--no-palette" not in sys.argv,
+                hitbox="--no-hitbox" not in sys.argv, marks="--no-marks" not in sys.argv)
     open(dst, "wb").write(out)
     print(f"wrote {dst}  md5={hashlib.md5(out).hexdigest()}  rom.sha={hashlib.sha1(out[HDR:]).hexdigest()}")
