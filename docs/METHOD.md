@@ -235,12 +235,71 @@ family), goal `$24`. HUD text shares the terrain white; the HUD is outside
 the play area. They are the `C` dictionary at the top of
 `code/simplify_rom.py`.
 
-### 3.5 Summary of the binary changes
+### 3.5 Sound
+
+The sound engine lives at the end of PRG-ROM (`$F2D0-$FFFF`) and runs inside
+the NMI handler, after the game logic of the frame. The game logic talks to
+it through six *queue* bytes (`$FA-$FF`: which sound effect or tune to
+start) and reads back exactly one byte of its state, `EventMusicBuffer`
+(`$07B1`), which it polls for zero in two places: while Mario falls off the
+screen after dying (the death tune must end before the lose-life routine
+runs) and in the end-of-level sequence (the level-clear tune must end before
+the next area loads). Everything else the engine touches is its own state
+(`$F0-$F9`, `$07B0-$07CA`) and the APU registers, which the CPU cannot read.
+The audio was therefore simplified with the same rule as the image, without
+touching the game logic:
+
+* **Music.** The six area tunes (ground, underground, water, castle, cloud,
+  pipe intro) are replaced by silence: the 6-byte table from which the game
+  picks the area tune now holds the "Silence" code for every area. The
+  star-power tune becomes a low continuous hum (one 24-frame C3 note that
+  loops; the game re-queues the area tune, i.e. silence, when the star
+  wears off). The tunes whose length the game logic waits for (death, level
+  clear, castle clear, victory, game over, time warning) are rewritten as
+  data for the unchanged music handler: one to three plain tones followed
+  by rests, on the square-2 channel only, with exactly the frame count of
+  the original tune (parsed from the original data and asserted at build
+  time; 180, 324, 364, 384, 216 and 168 frames). The volume envelope tables
+  are flattened to one constant volume. The headers of the other area tunes
+  point to a silent loop, so that a savestate captured while music was
+  playing goes silent at the end of its current section.
+* **Sound effects.** The three per-channel handlers of the original (about
+  730 bytes of code with a hand-written envelope or sweep for each of the 17
+  effects) are replaced by one table-driven routine of 267 bytes, assembled
+  at build time by a minimal assembler in the script: when a queue bit is
+  set, it looks up (length, pitch, control byte) for that bit, writes the
+  channel registers once, counts the length down and then switches the
+  channel off. Every effect is thus one constant tone. The cues are
+  assigned per visual category: jump (also the swim stroke), block hit,
+  enemy defeated (stomp and fireball/shell kill share it), Mario shrinks,
+  fireball, flagpole slide, coin, item emerging (also the vine), power-up
+  collected, extra life, Bullet Bill fired, brick shattered (noise),
+  Bowser's flame (noise). The end-of-level timer count, fireworks and pipe
+  entry are removed. The pause jingle is untouched. The full legend is in
+  the README.
+* **Queue sites.** Three of the original effects share a queue bit with an
+  unrelated event: pipe entry with injury, fireworks (and Bowser's bridge)
+  with the Bullet Bill blast, and the swim stroke with the enemy stomp. At
+  the four gameplay sites concerned, the operand that names the queue bit
+  (and, for the pipe and fireworks sites, the queue byte) is changed so
+  that the swim stroke uses the jump bit and pipe entry and fireworks land
+  on unused bits of the noise queue mapped to silence. Each site overwrites
+  the register right after the store, so the new value reaches nothing but
+  the queue.
+
+The sound-engine RAM (`$F0-$FF`, `$07B0-$07CA`) therefore differs from the
+original ROM during play, and `verify_replays.py` masks it; every other RAM
+byte, i.e. everything the game logic computes, must still match, and does
+(section 5).
+
+### 3.6 Summary of the binary changes
 
 | Region | Bytes changed | Nature |
 |---|---|---|
 | iNES header | 0 | |
-| PRG-ROM code and level data | 0 | |
+| PRG-ROM level data | 0 | |
+| PRG-ROM game logic | 6 | operands at the four sites that queue the swim, pipe-entry and fireworks sounds |
+| PRG-ROM sound engine | 966 | sound-effect handler region (731, of which 267 bytes of new code and tables, the rest `$FF`), its call sites (12), tune headers (95) and data (84), envelope tables (32) and constants (5), area-tune selection table (6) |
 | PRG-ROM presentation data | 199 | palette tables (156), metatile-graphics table (32), enemy-graphics and power-up-attribute tables (4), sprite-palette operands (7) |
 | CHR-ROM | 5528 | tile shapes |
 
@@ -255,7 +314,12 @@ Bloober frame, whose tile is a body tile in the first frame.
 `code/simplify_rom.py ORIGINAL.nes OUTPUT.nes` rebuilds the ROM
 deterministically from the original ROM (md5 `811b027eaf99c2def7b933c5208636de`)
 and the tables in the script; every PRG patch asserts the original bytes
-before writing. The current ROM has md5 `626c679210364593883e8be91dac7f99`.
+before writing. The current ROM has md5 `e0d177c472ea7ca7540fcfd0b6141006`
+(`626c679210364593883e8be91dac7f99` with `--no-sound`, i.e. the previous
+version with the original sound). The sound-effect handler is written as
+assembly text in the script and assembled at build time by a 40-line
+assembler that covers the fifteen instructions it uses; no external tool is
+needed.
 The tool used for the earlier, hand-made versions of this ROM (SMB Utility)
 is no longer needed.
 
@@ -270,7 +334,7 @@ remaining inputs.
 
 Results on recordings from levels 1-1 (including one with fire Mario, star
 power and a completed level), 1-2, 1-3, 3-1, 4-2, 5-1 and 8-2 (1900 to 6000
-frames each), for the current ROM:
+frames each), for the ROM before the sound change (`--no-sound`):
 
 * the only bytes that ever differ lie in the PPU write buffer
   (`$0300-$03B0`, on the frames where a screen column or a palette is
@@ -296,6 +360,26 @@ With tile changes only (the CHR-ROM), RAM is byte-identical on every frame,
 which was checked on the earlier versions of the ROM; the collision-box
 carving of section 3.3 is a CHR-only change.
 
+The sound change (section 3.5) was verified the same way on eight
+recordings of a test participant (levels 1-1 and 3-1, 650 to 4250 frames,
+including four deaths, two completed levels with the level-clear tune and
+the end-of-level wait, an injury, coins, stomps and block hits): outside
+the PPU buffers and the sound-engine RAM, no byte differs on any frame
+between the original ROM and the current ROM, and the mid-run savestate
+tracks. The frames at which `EventMusicBuffer` returns to zero after each
+death and after the flag are the same on both ROMs. The star-power hum and
+the time-warning tune, absent from these recordings, were exercised by
+loading level 1-1, queueing the star tune and setting the game timer to
+101 in the emulator RAM after 300 frames, on both ROMs: the warning tune
+occupies the same 168 frames on both, the hum resumes after it, and the
+rest of RAM stays identical. The two level states captured mid-level (4-1,
+6-x) were played with scripted input on both ROMs, before and after the
+sound fix of `fix_state.py`: RAM identical outside the masked bytes in every
+combination. The audio of each replay was written to a `.wav`
+(`verify_replays.py --wav`) and checked frame by frame: it is silent
+except for one tone at each queued event (the emulator's output filter
+adds a short decaying tail).
+
 Visual checks were made on every level state and on replay frames covering
 day, night, underground, tree-top, bonus and castle-exterior areas, including
 coins, all four power-ups, star power, fire Mario, dying Mario, shells,
@@ -318,7 +402,7 @@ drawn by the simplified ROM (light-blue icon). The other 143
 recordings (79 of them the first repetition of a run) start in gameplay and
 keep the original colours on the simplified ROM until the next area change,
 which makes, for instance, Lakitu white and pipes green.
-`code/fix_state_palette.py` rewrites the 32 palette bytes inside a state or
+`code/fix_state.py` rewrites the 32 palette bytes inside a state or
 `Core.bin` (it locates the fceumm `PRAM` chunk structurally, so it applies
 whatever palette is stored and can be re-run after a colour change); the run
 is RAM-identical afterwards, and applying it to every recording makes both
@@ -328,6 +412,17 @@ repository have been rewritten this way (their game state is untouched; the
 recordings made on the simplified ROM start with the simplified palette. The
 intermission backdrop comes from the same table entry as the underground
 backdrop, which is why one backdrop colour is used for both.
+
+The same tool handles the sound counterpart of that pitfall. A state
+captured mid-level carries the music that was playing (which tune, and the
+engine's position in its data); on the simplified ROM the engine would go
+on reading the original tune from there until the end of the current
+section. `fix_state.py` clears the sound-effect and music buffers inside
+the state's RAM chunk and queues "Silence", which the engine turns into an
+idle state on the first frame; these seven bytes are never read by game
+logic, so the run is unchanged. The two level states captured mid-level
+(4-1 and 6-x) are rewritten this way; the 24 others were captured on the
+"WORLD x-y" screen with the engine already idle.
 
 ## 6. Semantic information: what is kept, what was added, what is lost
 
@@ -404,6 +499,29 @@ shapes.
 | score, coins, world, time, lives | HUD text | kept |
 | death by falling into a pit | none in the original | same as original |
 
+**Sounds**
+
+| Information | Original cue | Simplified ROM |
+|---|---|---|
+| area (ground, underground, water, castle, cloud), pipe intro | six tunes | removed (silence) |
+| star power active | tune | kept: continuous low hum (also shown by Mario's flashing) |
+| time below 100 s | jingle | kept: three short beeps |
+| death, level clear, castle clear, game over, victory | jingles | kept: one to three plain tones, then silence, same length |
+| jump; big vs small Mario | two jump sounds | one jump tone (size is visible) |
+| swim stroke | shares the stomp sound | jump tone |
+| enemy defeated: stomped vs killed by fireball/shell; Bowser falls | three sounds | one tone |
+| block hit, fireball explodes, shell bumps | one sound | kept, one tone |
+| Mario shrinks | shares the pipe-entry sound | own tone |
+| pipe entry | shares the injury sound | removed (the transition is visible) |
+| fireball thrown, coin, extra life, power-up collected | one sound each | kept, one tone each |
+| item emerges from a block; vine grows | two sounds | one tone |
+| flagpole slide | sound | kept, sustained tone |
+| Bullet Bill fired; Bowser's bridge collapses | share the fireworks sound | one tone |
+| fireworks, end-of-level timer count | sounds | removed (decoration) |
+| brick shattered | noise | kept, noise burst (the debris is transparent) |
+| Bowser's flame | noise | kept, noise burst |
+| pause | jingle | untouched |
+
 ## 7. Limitations and design decisions
 
 * **Collision boxes that stick out of the drawn sprite.** Hammer Bro's box
@@ -435,11 +553,24 @@ shapes.
 * **Shape information is reduced to the box.** Objects are distinguished by
   colour, by the size of their collision box and by the shape marks of
   section 3.3; pose is gone.
-* **Savestates carry a palette.** A recording's `Core.bin` keeps the original
-  palette until the next area load, which shows on its first "WORLD x-y"
-  screen (original Mario icon colours) and, for recordings that start
-  mid-level, in the level itself; rewrite it with `code/fix_state_palette.py`
-  (section 5). The level states of this repository are already rewritten.
+* **Savestates carry a palette and the sound state.** A recording's
+  `Core.bin` keeps the original palette until the next area load, which
+  shows on its first "WORLD x-y" screen (original Mario icon colours) and,
+  for recordings that start mid-level, in the level itself; the latter also
+  keep playing the original tune until the end of its current section.
+  Rewrite them with `code/fix_state.py` (section 5). The level states of
+  this repository are already rewritten.
+* **Sound cues are one tone each.** Pitch, length and duty cycle are the
+  only differences between cues, so two cues close in pitch (e.g. the coin
+  and the extra life) are told apart mainly by their length; the values in
+  `CUES` are meant to be tuned by listening. Cues on the same channel
+  interrupt each other, as in the original; a tune note that starts while
+  an effect plays on square 2 is skipped, as in the original.
+* **The sound change is a code change.** Unlike the graphics, which only
+  touch data, the sound-effect handler is new code and six gameplay bytes
+  name a different queue bit. The argument that this is gameplay-neutral is
+  in section 3.5 and was tested in section 5, but it rests on reading the
+  code, not only on the emulator's memory map.
 * **Castle levels.** The `Level?-4.state` files, inherited from
   `mario.stimuli`, are not savestates (they are an 813-byte JSON file) and
   cannot be loaded; castle levels are not part of the dataset.

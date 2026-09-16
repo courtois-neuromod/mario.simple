@@ -40,11 +40,31 @@ Design
       a Paratroopa carries a 8x2 wing bar just above its box;
       a squished Goomba is a 16x4 bar, the springboard is striped.
 
+* Sound follows the same rule.  All music is removed (silence), except the
+  star-power tune, which becomes a low continuous hum while Mario is
+  invincible.  Every sound effect that carries game information becomes one
+  constant tone (a pitch, a duration, a square duty or a noise period) per
+  category, and the decorative ones (fireworks, the end-of-level timer
+  count, pipe entry) are removed.  The tunes that the game itself waits for
+  (death, level clear, game over, time warning) become one to three plain
+  tones followed by silence and keep their exact length.  See CUES / TUNES.
+
 How the ROM is changed
 ----------------------
 * CHR-ROM (tile graphics) is rewritten from the tables below.
-* PRG-ROM: only *presentation data* is patched, never code paths or level
-  data:
+* Sound (PRG-ROM $F2D0-$FFFF, the sound engine): the three sound-effect
+  handlers are replaced by one table-driven routine assembled at build time,
+  the tune data and headers are rewritten for the unchanged music handler,
+  and five 1-6 byte operands are changed (the area-music selection table,
+  the queue bit of the swim stroke, of pipe entry and of fireworks, and two
+  envelope constants).  This is the only code the build changes.  It is
+  gameplay-neutral because game logic only ever writes the sound queues and
+  reads back one byte, EventMusicBuffer, to wait for the death and
+  level-clear tunes, whose lengths are preserved (asserted).  The sound
+  engine's RAM ($F0-$FF, $07B0-$07CA) does differ from the original ROM and
+  is masked by verify_replays.py; every other byte still matches.
+* PRG-ROM otherwise: only *presentation data* is patched, never code paths
+  or level data:
     - the 4 area palette sets, the day/night snow and mushroom palette
       variants, the Bowser palette, the player palette rows, the
       backdrop-colour table, and the palette-3 rotation tables the game uses
@@ -61,12 +81,14 @@ How the ROM is changed
       and that stop the fire flower / star palette cycling.
   These bytes only feed the PPU write buffer ($0300-$03FF) and the sprite
   buffer ($0200-$02FF), which game logic never reads.  RAM outside those two
-  buffers, .bk2 replays and savestates therefore stay identical to the
-  original ROM (verified on participant replays, see verify_replays.py).
+  buffers and the sound engine's own bytes, .bk2 replays and savestates
+  therefore stay identical to the original ROM (verified on participant
+  replays, see verify_replays.py).
 
-Usage: simplify_rom.py ORIGINAL.nes OUTPUT.nes [--no-hitbox] [--no-marks] [--no-pipes] [--no-palette]
+Usage: simplify_rom.py ORIGINAL.nes OUTPUT.nes [--no-hitbox] [--no-marks] [--no-pipes] [--no-palette] [--no-sound]
   --no-hitbox : draw every sprite tile as a full 8x8 square (v5 look)
   --no-marks  : no eye / hollow / teeth / wing / stripe shapes
+  --no-sound  : keep the original music and sound effects
 """
 import sys, hashlib
 
@@ -266,6 +288,243 @@ BOWSER_PALETTE = 0x0D5C                             # "3F 14 04" + 4 bytes (spri
 PALETTE3_DATA = 0x09E1                              # 4 rows (water/ground/underground/castle) x 4: BG palette 3 rewritten every 8 frames
 COLOR_ROTATE = 0x09D3                               # 6 colours the game cycles into BG palette 3 index 1 (the ?-block/coin flash)
 
+# ------------------------------------------------------------------ sound --
+# The sound engine ($F2D0-$FFFF) runs inside the NMI handler.  Game logic
+# talks to it through six queue bytes ($FA-$FF) and reads back exactly one
+# thing: EventMusicBuffer ($07B1), polled for zero while Mario falls into a
+# hole (death tune must end) and in the end-of-level sequence (level-clear
+# tune must end).  Everything else the engine touches is its own state
+# ($F0-$F9, $07B0-$07CA) and the APU registers.  So:
+#   * sound effects can be anything, as long as the queue bits keep their
+#     meaning (the three sfx handlers are replaced by one table-driven one);
+#   * event tunes are rewritten as data for the unchanged music handler and
+#     keep their exact frame count (asserted against the original data);
+#   * area music is silenced by queueing "Silence" instead of a tune, and the
+#     star-power tune becomes a looping hum;
+#   * four gameplay sites get a 1-2 byte operand change so that the swim
+#     stroke shares the jump cue, and pipe entry and fireworks land on unused
+#     noise-channel bits that map to silence; each site overwrites the
+#     register right after the store, so nothing else sees the new value.
+def _cpu(a): return a - 0x8000 + HDR                # CPU address -> file offset
+
+# Cues.  A cue is one constant tone: (frames, pitch, control byte).  pitch indexes the game's
+# FreqRegLookupTbl (even values; 4 is a rest); the control byte is duty<<6 | $30 | volume for the
+# square channels and $30 | volume for noise, whose "pitch" is the noise period (0-15).
+NOTE = dict(G2=0x5A, C3=0x5C, D3=0x5E, E3=0x06, G3=0x0C, A3=0x62, C4=0x14, E4=0x1C, G4=0x22, A4=0x26,
+            C5=0x2C, E5=0x34, G5=0x3A, A5=0x40, B5=0x42, D6=0x48, E6=0x44, REST=0x04)
+def sq(frames, note, duty, vol=8): return (frames, NOTE[note], (duty << 6) | 0x30 | vol)
+def noise(frames, period, vol=8):  return (frames, period, 0x30 | vol)
+SILENT = (1, 0, 0x30)
+CUES = dict(                       # name: cue                  visual category / meaning
+    jump      = sq(6,  'E4', 2),   # Mario: jump (small and big) and swim stroke
+    bump      = sq(4,  'G3', 0),   # terrain / block hit from below, fireball explodes, shell bumps
+    enemy     = sq(6,  'C5', 1),   # enemy defeated (stomped, hit by fireball or shell, Bowser falls)
+    injury    = sq(24, 'C3', 2),   # Mario shrinks
+    fireball  = sq(3,  'A5', 0, 6),# fire Mario throws a fireball
+    goal      = sq(64, 'A4', 2, 6),# flagpole slide
+    coin      = sq(5,  'B5', 1),   # coin collected
+    item      = sq(16, 'G4', 0, 6),# item emerges from a block, vine grows
+    powerup   = sq(16, 'E5', 2),   # mushroom / flower / star collected
+    oneup     = sq(16, 'G5', 1),   # extra life
+    hazard    = sq(8,  'G2', 0),   # Bullet Bill fired (also Bowser's bridge collapsing)
+    brick     = noise(12, 8),      # brick shatters
+    flame     = noise(24, 12, 6),  # Bowser's flame
+)
+SFX_BITS = {                       # queue bit -> cue, per channel (bit order of the original engine)
+    1: ['jump', 'bump', 'enemy', 'enemy', 'injury', 'fireball', 'goal', 'jump'],      # $FF: big jump, bump, stomp/swim, smack, pipe-injury, fireball, flagpole, small jump
+    2: ['coin', 'item', 'item', 'hazard', None, 'powerup', 'oneup', 'enemy'],          # $FE: coin, power-up reveal, vine, blast, timer tick, power-up grab, 1-up, Bowser fall
+    3: ['brick', 'flame', None, None, None, None, None, None],                         # $FD: brick shatter, Bowser flame, (pipe entry), (fireworks)
+}
+CHANNEL = {  # queue, buffer, sfx length counter, first APU register, $4015 mask with the channel off, SetFreq helper
+    1: dict(QUEUE=0xFF, BUF=0xF1, CNT=0x07BB, REG=0x4000, MASK=0x0E, SETFREQ=0xF38B),
+    2: dict(QUEUE=0xFE, BUF=0xF2, CNT=0x07BD, REG=0x4004, MASK=0x0D, SETFREQ=0xF3A9),
+    3: dict(QUEUE=0xFD, BUF=0xF3, CNT=0x07BF, REG=0x400C, MASK=0x07, SETFREQ=None),
+}
+SFX_CODE = (0xF3B1, 0xF691)        # CPU range of the three original sfx handlers (SwimStompEnvelopeData .. ContinueMusic), replaced
+SFX_CODE_SHA1 = "8b205259690963863a944d7073675d1568d8c202"
+SFX_CALLS = {                      # file offset: (expected jsr operands, new targets by label)
+    0x735B: ("20 1B F4 20 7C F5 20 67 F6", ['H1', 'H2', 'H3']),   # RunSoundSubroutines: Square1SfxHandler, Square2SfxHandler, NoiseSfxHandler
+    0x76BB: ("20 A7 F4 20 71 F5",          ['S1', 'T2']),         # LoadEventMusic (death): StopSquare1Sfx, StopSquare2Sfx
+    0x76DC: ("20 A7 F4",                   ['S1']),               # LoadAreaMusic (underground): StopSquare1Sfx
+}
+SOUND_SITES = {  # file offset: (expected, new) - gameplay sites that queue a sound, and music data
+    0x3510: ("A9 04 85 FF", "A9 01 85 FF"),   # swim stroke: queue the (big) jump bit instead of the stomp bit
+    0x5DE3: ("A0 10 84 FF", "A0 04 84 FD"),   # sideways pipe entry: noise bit 2 (silent) instead of pipe/injury
+    0x5F13: ("A9 10 85 FF", "A9 04 85 FD"),   # vertical pipe entry: idem
+    0x52D1: ("A9 08 85 FE", "A9 08 85 FD"),   # fireworks: noise bit 3 (silent) instead of the blast
+    0x10F7: ("02 01 04 08 10 20", "80 80 80 80 80 80"),   # MusicSelectData: water, ground, underground, castle, cloud, pipe intro -> Silence
+    0x78E8: ("AD B1 07 29 08 F0 04 A9 04 D0 0C A5 F4 29 7D F0 04 A9 08 D0 02 A9 28",   # LoadControlRegs: no castle special case,
+             "AD B1 07 29 00 F0 04 A9 04 D0 0C A5 F4 29 7D F0 04 A9 27 D0 02 A9 27"),  # every note starts at envelope index $27
+    0x7904: ("AD B1 07 29 08 F0 04 B9 96 FF", "AD B1 07 29 00 F0 04 B9 96 FF"),       # LoadEnvelopeData: castle uses the usual tables too
+    0x77B5: ("29 91 D0 13", "29 90 D0 13"),   # square 2 music: death tune goes through the envelope table like the others
+}
+ENV_TABLES = 0xFF96                # EndOfCastleMusicEnvData(4) + AreaMusicEnvData(8) + WaterEventMusEnvData(40): volume per envelope index
+MUSIC_VOL = 6                      # constant volume of every tune note (index 0 stays silent: rests)
+MHD = 0xF90D                       # MusicHeaderData; headers are (length row, data lo, data hi, triangle offset, square-1 offset[, noise offset])
+LEN_TBL, LEN_ROW = 0xFF66, 0x10    # MusicLengthLookupTbl; row $10 = [3, 6, 12, 24, 48, 18, 36, 8] frames
+STAR_DATA = 0xF9B8                 # Star_CloudMData: replaced by the hum track followed by the silent-loop track
+AREA_HEADERS = {0x69: 6, 0x6F: 6, 0x75: 6, 0x7B: 6, 0x81: 6, 0x87: 6, 0x8D: 6, 0x93: 6, 0x99: 6, 0x9F: 6,  # ground music sections
+                0x5E: 6, 0x46: 5, 0x4F: 5}                                                                 # water, underground, castle
+STAR_HEADER = 0x36
+R = 'REST'
+TUNES = {  # header offset from MHD: (name, length row, notes [(note, frames)...]); total frames are asserted against the original tune
+    0xA5: ('death',        0x10, [('C3', 24), (R, 156)]),
+    0x59: ('game over',    0x10, [('G2', 36), (R, 180)]),
+    0x3C: ('level clear',  0x10, [('C4', 12), ('E4', 12), ('G4', 12), (R, 288)]),
+    0x64: ('castle clear', 0x10, [('C4', 12), ('E4', 12), ('G4', 12), (R, 328)]),
+    0x54: ('victory',      0x10, [('C4', 12), ('E4', 12), ('G4', 12), (R, 348)]),
+    0x31: ('time warning', 0x08, [('A5', 6), (R, 6), ('A5', 6), (R, 6), ('A5', 6), (R, 138)]),  # row $08 + the engine's +8 = row $10
+}
+HUM = [('C3', 24)]                 # star power: this note, looped
+
+def _hex(s): return bytes(int(b, 16) for b in s.split())
+
+def asm(src, org, sym):
+    """Two-pass assembler for the handful of 6502 instructions used by the sfx handler."""
+    OPS = {('lda', 'imm'): 0xA9, ('lda', 'abs'): 0xAD, ('lda', 'abx'): 0xBD, ('sta', 'abs'): 0x8D,
+           ('ldx', 'imm'): 0xA2, ('stx', 'abs'): 0x8E, ('inx', 'imp'): 0xE8, ('lsr', 'imp'): 0x4A,
+           ('dec', 'abs'): 0xCE, ('jsr', 'abs'): 0x20, ('jmp', 'abs'): 0x4C, ('rts', 'imp'): 0x60,
+           ('bcc', 'rel'): 0x90, ('beq', 'rel'): 0xF0, ('bne', 'rel'): 0xD0}
+    SIZE = dict(imp=1, imm=2, rel=2, abx=3, abs=3)
+    def mode(op, arg):
+        if arg is None: return 'imp'
+        if arg.startswith('#'): return 'imm'
+        if op in ('bcc', 'beq', 'bne'): return 'rel'
+        return 'abx' if arg.lower().endswith(',x') else 'abs'
+    lines = []
+    for raw in src.splitlines():
+        raw = raw.split(';')[0].strip()
+        if not raw: continue
+        label, raw = (s.strip() for s in raw.split(':', 1)) if ':' in raw else (None, raw)
+        parts = raw.split(None, 1)
+        lines.append((label, parts[0].lower() if parts else None, parts[1].strip() if len(parts) > 1 else None))
+    labels, pc = {}, org
+    for label, op, arg in lines:
+        if label: labels[label] = pc
+        if op: pc += SIZE[mode(op, arg)]
+    def val(s):
+        s = s.lstrip('#'); s = s[:-2] if s.lower().endswith(',x') else s
+        if s.startswith('$'): return int(s[1:], 16)
+        assert s in labels or s in sym, f"unknown symbol {s}"
+        return labels[s] if s in labels else sym[s]
+    out, pc = bytearray(), org
+    for label, op, arg in lines:
+        if not op: continue
+        m = mode(op, arg); out.append(OPS[(op, m)]); pc += SIZE[m]
+        if m == 'imm': out.append(val(arg))
+        elif m == 'rel':
+            d = val(arg) - pc; assert -128 <= d < 128, arg; out.append(d & 0xFF)
+        elif m in ('abs', 'abx'): v = val(arg); out += bytes([v & 0xFF, v >> 8])
+    return bytes(out), labels
+
+def sfx_handler(c):
+    """One channel's handler: start the cue of the lowest queued bit, else count the playing cue down and stop it.
+    Entry points: H<c> (per frame), S<c> (stop and clear the buffer), T<c> (stop, keep the buffer), as in the original."""
+    p = CHANNEL[c]
+    play = (f"jmp ${p['SETFREQ']:04X}" if p['SETFREQ'] else       # squares: A = pitch -> period registers, then rts
+            "sta $400E\n lda #$08\n sta $400F\n rts")              # noise: A = period
+    return f"""
+H{c}:  lda ${p['QUEUE']:02X}
+       beq C{c}
+       sta ${p['BUF']:02X}
+       ldx #$FF
+F{c}:  inx
+       lsr
+       bcc F{c}                  ; X = index of the lowest set queue bit
+       lda LEN{c},x
+       sta ${p['CNT']:04X}
+       lda CTRL{c},x
+       sta ${p['REG']:04X}
+       lda #$7F
+       sta ${p['REG'] + 1:04X}    ; sweep off (negate set so no note is muted); harmless on the noise channel
+       lda PITCH{c},x
+       {play}
+C{c}:  lda ${p['BUF']:02X}
+       beq X{c}
+       dec ${p['CNT']:04X}
+       bne X{c}
+S{c}:  ldx #$00
+       stx ${p['BUF']:02X}     ; X only: the music handler calls S/T and keeps using A afterwards
+T{c}:  ldx #${p['MASK']:02X}
+       stx $4015
+       ldx #$0F
+       stx $4015                 ; switching the channel off and on clears its length counter: silence
+X{c}:  rts
+"""
+
+def build_sfx(org):
+    """Assemble the three handlers and their tables at CPU address org; return (code bytes, labels)."""
+    src = "".join(sfx_handler(c) for c in (1, 2, 3))
+    names = [f"{n}{c}" for c in (1, 2, 3) for n in ('LEN', 'PITCH', 'CTRL')]
+    size = len(asm(src, org, {n: 0 for n in names})[0])         # the tables follow the code
+    sym, tables = {}, b""
+    for c in (1, 2, 3):
+        cues = [CUES[n] if n else SILENT for n in SFX_BITS[c]]
+        for k, name in enumerate(('LEN', 'PITCH', 'CTRL')):
+            sym[f"{name}{c}"] = org + size + len(tables)
+            tables += bytes(cue[k] for cue in cues)
+    code, labels = asm(src, org, sym)
+    assert len(code) == size
+    return code + tables, labels
+
+def decompose(frames, lens):
+    """Split a duration into the fewest available note lengths (exact)."""
+    best = {0: []}
+    for t in range(1, frames + 1):
+        opts = [best[t - L] + [L] for L in lens if t - L in best]
+        if opts: best[t] = min(opts, key=len)
+    assert frames in best, f"{frames} frames cannot be made from {lens}"
+    return best[frames]
+
+def track(notes, lens):
+    """Square-2 track bytes for [(note, frames)...]: length bytes, notes, terminator, plus a $00 for the triangle offset."""
+    out, cur = [], None
+    for note, frames in notes:
+        for L in decompose(frames, lens):
+            if lens.index(L) != cur: cur = lens.index(L); out.append(0x80 | cur)
+            out.append(NOTE[note])
+    return bytes(out + [0, 0])
+
+def tune_frames(rom, hdr, lens_all, adder=0):
+    """Total frames of the square-2 track an original header points to (the tune's lifetime in EventMusicBuffer)."""
+    row = rom[hdr] + adder                                        # the engine adds 8 for the time-running-out tune
+    data = _cpu(rom[hdr + 1] | rom[hdr + 2] << 8); total = cur = 0; i = 0
+    while rom[data + i]:
+        b = rom[data + i]; i += 1
+        if b & 0x80: cur = lens_all[row + (b & 7)]
+        else: total += cur
+    return total
+
+def patch_sound(rom):
+    lo, hi = map(_cpu, SFX_CODE)
+    assert hashlib.sha1(rom[lo:hi]).hexdigest() == SFX_CODE_SHA1, "sfx handler region is not the original"
+    code, labels = build_sfx(SFX_CODE[0])
+    assert len(code) <= hi - lo
+    rom[lo:hi] = code + b"\xFF" * (hi - lo - len(code))
+    for off, (old, targets) in SFX_CALLS.items():
+        _expect(rom, off, _hex(old))
+        for k, t in enumerate(targets): rom[off + 3*k + 1:off + 3*k + 3] = bytes([labels[t] & 0xFF, labels[t] >> 8])
+    for off, (old, new) in SOUND_SITES.items():
+        _expect(rom, off, _hex(old)); rom[off:off + len(_hex(new))] = _hex(new)
+    env = _cpu(ENV_TABLES)
+    _expect(rom, env, [0x98, 0x99, 0x9A, 0x9B, 0x90, 0x94]); _expect(rom, env + 12, [0x90, 0x91, 0x92, 0x92])
+    for base, n in ((0, 4), (4, 8), (12, 40)):
+        rom[env + base:env + base + n] = bytes([0x90] + [0x90 | MUSIC_VOL] * (n - 1))
+    lens_all = list(rom[_cpu(LEN_TBL):_cpu(LEN_TBL) + 48]); lens = lens_all[LEN_ROW:LEN_ROW + 8]
+    hum, loop = track(HUM, lens), track([('REST', lens[3])], lens)
+    hum += bytes([0x01, 0x00]); loop += bytes([0x01, 0x00])        # noise track: one silent beat, loop (a $00 first would spin the engine)
+    _expect(rom, _cpu(STAR_DATA), [0x84, 0x2C, 0x2C, 0x2C]); rom[_cpu(STAR_DATA):_cpu(STAR_DATA) + len(hum + loop)] = hum + loop
+    for off, size in list(AREA_HEADERS.items()) + [(STAR_HEADER, 6)]:
+        hdr = _cpu(MHD) + off; data = STAR_DATA if off == STAR_HEADER else STAR_DATA + len(hum)
+        rom[hdr:hdr + size] = bytes([LEN_ROW, data & 0xFF, data >> 8, 2, 0, 4][:size])   # triangle -> $00, square 1 off, noise -> silent beat
+    for off, (name, row, notes) in TUNES.items():
+        hdr = _cpu(MHD) + off; want = tune_frames(rom, hdr, lens_all, 8 if off == 0x31 else 0)
+        assert sum(f for _, f in notes) == want, f"{name}: {sum(f for _, f in notes)} frames, original {want}"
+        t = track(notes, lens); data = _cpu(rom[hdr + 1] | rom[hdr + 2] << 8)
+        rom[data:data + len(t)] = t
+        rom[hdr:hdr + 5] = bytes([row, rom[hdr + 1], rom[hdr + 2], len(t) - 2, 0])
+    return rom
+
 def solid(idx):
     lo = 0xFF if idx & 1 else 0x00
     hi = 0xFF if idx & 2 else 0x00
@@ -309,7 +568,7 @@ def carve(t, idx, hitbox=True, marks=True):
 def _expect(rom, off, header):
     assert bytes(rom[off:off+len(header)]) == bytes(header), f"unexpected bytes at {off:#x}"
 
-def build(rom: bytes, patch_pipes=True, patch_palette=True, hitbox=True, marks=True) -> bytes:
+def build(rom: bytes, patch_pipes=True, patch_palette=True, hitbox=True, marks=True, sound=True) -> bytes:
     assert len(rom) == HDR + PRG + CHR, "unexpected ROM size"
     rom = bytearray(rom)
     chr0 = HDR + PRG
@@ -342,6 +601,8 @@ def build(rom: bytes, patch_pipes=True, patch_palette=True, hitbox=True, marks=T
         _expect(rom, BOWSER_PALETTE, [0x3F, 0x14, 0x04]); rom[BOWSER_PALETTE+3:BOWSER_PALETTE+7] = bytes(SPR_PAL[1])
         _expect(rom, PALETTE3_DATA, [0x0F, 0x07, 0x12, 0x0F]); rom[PALETTE3_DATA:PALETTE3_DATA+16] = bytes(BG_PAL[3]*4)
         _expect(rom, COLOR_ROTATE, [0x27, 0x27, 0x27, 0x17, 0x07, 0x17]); rom[COLOR_ROTATE:COLOR_ROTATE+6] = bytes([C['qblock']]*6)
+    if sound:
+        patch_sound(rom)
     return bytes(rom)
 
 if __name__ == "__main__":
@@ -351,6 +612,6 @@ if __name__ == "__main__":
     if hashlib.md5(rom).hexdigest() != ORIG_MD5:
         print("warning: input is not the original SMB ROM used by mario.stimuli", file=sys.stderr)
     out = build(rom, patch_pipes="--no-pipes" not in sys.argv, patch_palette="--no-palette" not in sys.argv,
-                hitbox="--no-hitbox" not in sys.argv, marks="--no-marks" not in sys.argv)
+                hitbox="--no-hitbox" not in sys.argv, marks="--no-marks" not in sys.argv, sound="--no-sound" not in sys.argv)
     open(dst, "wb").write(out)
     print(f"wrote {dst}  md5={hashlib.md5(out).hexdigest()}  rom.sha={hashlib.sha1(out[HDR:]).hexdigest()}")

@@ -130,14 +130,19 @@ The simplified game was designed under three constraints.
   the image, i.e.\ rendered as the uniform backdrop. This includes clouds, hills, bushes,
   background trees, tree trunks and the stumps under tree-top ledges, mushroom stems, fences,
   chains, bridge guard-rails, the water surface line, sea plants, balance-lift ropes and pulleys,
-  the end-of-level castle, fireworks and brick debris.
+  the end-of-level castle, fireworks and brick debris. The same rule is applied to the audio: all
+  music is removed, and so are the decorative sound effects (fireworks, the end-of-level timer
+  count, pipe entry).
   \item \textbf{Semantic colour coding.} Every element the player can interact with is drawn as
   a flat rectangle of a single colour, and the colour is a semantic category that is the same in
   every level regardless of the original day, night, underground or water palette
   (Table~\ref{tab:legend}). Moving objects are drawn as the exact rectangle of the collision box
   the game uses for them, so that what is seen is what the game reacts to
   (Section~\ref{sec:hitbox}); the game states that matter for play but that colour cannot carry
-  are encoded by a few simple shapes (Table~\ref{tab:shapes}).
+  are encoded by a few simple shapes (Table~\ref{tab:shapes}). Likewise every sound effect that
+  carries game information becomes one constant tone per category, the tunes the game itself waits
+  for become one to three plain tones of unchanged length, and star power is a continuous hum
+  (Section~\ref{sec:sound}).
   \item \textbf{Logical identity.} Program code, physics, level layouts, enemy behaviour, RAM
   layout and random-number generation are untouched, so that controller recordings and savestates
   made on the original game remain valid on the simplified one, RAM-derived behavioural variables
@@ -458,12 +463,44 @@ player's light blue so that the change of state is visible while keeping the obj
   \label{tab:palettes}
 \end{table}
 
+\subsection{Sound}
+\label{sec:sound}
+
+The sound engine occupies the end of PRG-ROM and runs inside the NMI handler after the game logic
+of the frame. Game logic drives it through six queue bytes (which effect or tune to start) and reads
+back a single byte of its state, \texttt{EventMusicBuffer}, which it polls for zero in two places:
+while Mario falls off the screen after dying (the death tune must end before the lose-life routine
+runs) and in the end-of-level sequence (the level-clear tune must end before the next area loads).
+Everything else the engine touches is its own state and the APU registers, which the CPU cannot
+read. The audio was therefore simplified under the same three constraints as the image. The six
+area tunes are replaced by silence through the table from which the game selects them; the
+star-power tune becomes a low continuous hum; the tunes the game waits for (death, level clear,
+castle clear, victory, game over, time warning) are rewritten as data for the unchanged music
+handler, as one to three plain tones followed by rests with exactly the frame count of the original
+tune, parsed from the original data and asserted at build time. The three per-channel sound-effect
+handlers of the original (about 730 bytes, one hand-written envelope or sweep per effect) are
+replaced by one table-driven routine of 267 bytes, assembled at build time by a minimal assembler
+included in the generator, which plays one constant tone (pitch, length, square duty or noise
+period) per queue bit. Cues are assigned per visual category: jump (also the swim stroke), block
+hit, enemy defeated, player shrinks, fireball, flagpole slide, coin, item emerging (also the vine),
+power-up collected, extra life, Bullet Bill fired, brick shattered and Bowser's flame (both noise).
+Three effects share a queue bit with an unrelated event in the original (pipe entry with injury,
+fireworks with the Bullet Bill blast, the swim stroke with the stomp); at the four gameplay sites
+concerned the operand naming the bit is changed so that the decorative events land on unused bits
+mapped to silence, and each site overwrites the register right after the store. The sound engine's
+RAM thus differs from the original ROM during play and is masked by the verification of
+Section~\ref{sec:verification}; every other byte, i.e.\ everything game logic computes, must still
+match. Savestates captured mid-level carry the tune that was playing; the companion tool that
+rewrites their palette also sets the engine idle.
+
 \subsection{Summary of the binary changes}
 \label{sec:changes}
 
 Table~\ref{tab:changes} summarises the bytes that differ between the original and the simplified
-cartridge image. No byte of program code or level data is changed; the 199 modified PRG-ROM bytes
-are all data that the game copies into the PPU write buffer or the sprite list.
+cartridge image. No byte of level data is changed. On the graphics side the 199 modified PRG-ROM
+bytes are all data that the game copies into the PPU write buffer or the sprite list; the sound
+change rewrites the sound-effect handler and the tune data of the sound engine and six operands at
+the gameplay sites that queue a sound (Section~\ref{sec:sound}).
 
 \begin{table}[t]
   \caption{Bytes changed in the cartridge image (40{,}976 bytes: 16-byte iNES header, 32~KB
@@ -475,7 +512,9 @@ are all data that the game copies into the PPU write buffer or the sprite list.
     Region & Bytes & Nature of the change \\
     \midrule
     iNES header & 0 & -- \\
-    PRG-ROM: code and level data & 0 & -- \\
+    PRG-ROM: level data & 0 & -- \\
+    PRG-ROM: game logic & 6 & operands at the four sites that queue the swim, pipe-entry and fireworks sounds \\
+    PRG-ROM: sound engine & 966 & sound-effect handler region (731, of which 267 bytes of new code and tables), its call sites (12), tune headers (95) and data (84), envelope tables (32) and constants (5), area-tune selection table (6) \\
     PRG-ROM: palette tables & 156 & four area palette sets, snow and mushroom variants, Bowser palette, player palette rows, backdrop table, question-block/coin animation tables \\
     PRG-ROM: metatile graphics table & 32 & pipe shafts (4) and castle (28) \\
     PRG-ROM: object graphics tables & 4 & power-up attribute table (2), Bloober frame 2 top row (2) \\
@@ -493,10 +532,10 @@ The simplified cartridge is generated deterministically from the original by a s
 (\texttt{code/simplify\_rom.py}) that contains the tile classification, the colour table and the
 list of PRG patches; every PRG patch asserts the original bytes before writing. The input is the
 original ROM of the \textit{mario} stimulus set (MD5 \texttt{811b027e\ldots}); the output has MD5
-\texttt{626c6792\ldots}. Companion tools reproduce the sprite survey
+\texttt{e0d177c4\ldots} (\texttt{626c6792\ldots} with the original sound). Companion tools reproduce the sprite survey
 (\texttt{survey\_sprite\_tiles.py}), the collision-box survey (\texttt{hitbox\_survey.py}), the
-verification of Section~\ref{sec:verification} (\texttt{verify\_replays.py}) and the palette
-rewrite of savestates (\texttt{fix\_state\_palette.py}). The stimulus is distributed as a drop-in replacement of the
+verification of Section~\ref{sec:verification} (\texttt{verify\_replays.py}) and the palette and
+sound-state rewrite of savestates (\texttt{fix\_state.py}). The stimulus is distributed as a drop-in replacement of the
 \textit{mario} stimulus set: same savestates, scenario and RAM-variable map, different
 \texttt{rom.nes}.
 
@@ -509,7 +548,9 @@ starting from the recording's own initial savestate, and the complete emulator R
 after every frame. Differences are only tolerated in three regions that the graphics path writes
 and game logic never reads: the sprite list (\hex{0200}--\hex{02FF}), the PPU write buffer
 (\hex{0300}--\hex{03FF}) and one zero-page scratch byte (\hex{0004}) in which the block-drawing
-routine hands its palette to a shared helper. A savestate is also taken halfway through the run on
+routine hands its palette to a shared helper, and, since the sound change, in the sound engine's
+own state (\hex{00F0}--\hex{00FF}, \hex{07B0}--\hex{07CA}), of which game logic reads back only
+\texttt{EventMusicBuffer} to wait for tunes whose length is preserved. A savestate is also taken halfway through the run on
 the original ROM, loaded into the simplified ROM, and the remaining input is replayed to check
 that the run continues identically. The same procedure applied to a graphics-only build (tile
 changes without any PRG patch) must yield byte-identical RAM on every frame, which tests the
@@ -518,8 +559,13 @@ emulator side of the argument.
 The verification set is seven recordings (levels 1-1 with fire Mario, star power and a completed
 level; 1-2; 1-3; 3-1; 4-2; 5-1; 8-2; 1{,}900--6{,}000 frames each) plus the 26 loadable level
 savestates of the stimulus set played for 600 frames with scripted input (run right, jump
-periodically). \TODO{consider running the full dataset (3{,}374 recordings) and reporting the
-count.}
+periodically). The sound change was verified on eight further recordings of a test participant
+(levels 1-1 and 3-1, 650--4{,}250 frames, including four deaths and two completed levels): no byte
+outside the tolerated regions differs on any frame, the mid-run savestate tracks, and
+\texttt{EventMusicBuffer} returns to zero on the same frames after each death and after the flag.
+The star-power hum and the time-warning tune were exercised by queueing them in RAM mid-level on
+both ROMs, with the same result. \TODO{consider running the full dataset (3{,}374 recordings) and
+reporting the count.}
 
 Two properties of the recordings matter for rendering them on the simplified ROM. First, a
 recording's initial savestate carries the PPU palette of the moment it was captured, i.e.\ the
