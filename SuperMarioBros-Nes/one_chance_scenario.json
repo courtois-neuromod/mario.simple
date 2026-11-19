@@ -1,0 +1,8 @@
+{
+    "done": {
+      "script": "lua:check_done"
+    },
+    "scripts": [
+      "one_chance_script.lua"
+    ]
+  }
