@@ -1,0 +1,21 @@
+{
+  "done": {
+    "variables": {
+      "lives": {
+        "measurement": "delta",
+        "op": "negative"
+      },
+      "stage": {
+        "measurement": "delta",
+        "op": "positive"
+      }
+    }
+  },
+  "reward": {
+    "variables": {
+      "xscrollLo": {
+        "reward": 1
+      }
+    }
+  }
+}
