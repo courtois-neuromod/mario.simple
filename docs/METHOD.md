@@ -24,10 +24,13 @@ keeping every other aspect of the task constant:
   sprite object (the player, enemies, items, projectiles) as a flat rectangle
   that is exactly its collision box, so that what is seen is what the game
   reacts to;
-* colour is a semantic category (terrain, brick, ?-block, coin, item, 1-up,
-  star, enemy, player, fire player, goal) that is identical in every level,
-  whatever the original day / night / underground / water palette, on a black
-  backdrop;
+* colour is a semantic category that is identical in every level, whatever
+  the original day / night / underground / water palette, on a black
+  backdrop. Blocks are coloured by what the player can do with them: nothing
+  (immutable terrain), break them (bricks), hit or use them (interactive:
+  question blocks, springboards, vines), collect them (coins); the other
+  categories are item, 1-up, star, launcher (the barrel of a cannon), enemy,
+  player, fire player and goal;
 * the game states that matter for play but that colour cannot carry (the
   side Mario faces, dying, a kickable shell, an enemy that cannot be stomped,
   a winged enemy) are encoded by a few simple shapes;
@@ -64,7 +67,7 @@ PPU write buffer and the sprite buffer, again with no effect on game state.
 
 Super Mario Bros composes the background from 16x16 *metatiles*, each made of
 four tiles listed in four tables in PRG-ROM (one table per background
-palette; found at CPU `$8B10-$8CC0`). We dumped those tables from the original
+palette; found at CPU `$8B10-$8CA3`). We dumped those tables from the original
 ROM and used them to assign every background tile to the block it belongs to
 (ground, brick, question block, pipe, cloud, bush, ...), rather than guessing
 from its picture. Each tile was then rewritten as either
@@ -74,20 +77,37 @@ from its picture. Each tile was then rewritten as either
   blocks; the index selects the semantic colour through the palettes of
   section 3.4.
 
-The flagpole shaft keeps its thin shape but is recoloured. Text and HUD tiles
-are untouched. The full classification is the `BG` table in
-`code/simplify_rom.py`.
+The flagpole shaft keeps its thin shape but is recoloured, and so is the coin
+icon of the status bar, which takes the coin colour (it shared the palette
+index of the question blocks). Text and the other HUD tiles are untouched.
+The full classification is the `BG` table in `code/simplify_rom.py`.
 
-Two tiles are shared between categories. Tile `$26` is both the fill of the
-decorative hills and the inner column of every pipe shaft, and tile `$47` is
-both the breakable brick and the wall of the end-of-level castle, so neither
-can be both transparent and solid. We therefore also edited the
-metatile-graphics table: the two pipe-shaft metatiles use the pipe-edge tile
-instead of `$26` (4 bytes), and the seven castle metatiles use the blank tile
-(28 bytes), which makes the castle, a purely decorative object, disappear.
+A Bullet Bill cannon is made of three metatiles: the barrel, from which the
+bullets come out, a pedestal and a column. They use background palette 1,
+like the ground and the bricks, and its third colour is free: the barrel has
+a colour of its own (launcher), the pedestal and the column are terrain.
+
+Some tiles are shared between categories, so that no tile rewrite can serve
+both. For those we edited the metatile-graphics table instead (42 bytes):
+
+* tile `$26` is both the fill of the decorative hills and the inner column of
+  every pipe shaft: the two pipe-shaft metatiles use the pipe-edge tile
+  instead (4 bytes);
+* tile `$47` is the breakable brick, the wall of the end-of-level castle and
+  the base of the springboard. The seven castle metatiles use the blank tile
+  (28 bytes), which makes the castle, a purely decorative object, disappear;
+  the two half-block metatiles that the game puts under a springboard, which
+  are solid and cannot be broken, use a terrain tile (4 bytes);
+* tiles `$A2`/`$A3` are the flagpole shaft and the vertical rope of the
+  balance lifts, which is decoration: the rope and pulley metatiles use the
+  blank tile (6 bytes).
+
 This table is read only when the game writes a new screen column into the
 PPU write buffer (section 5 confirms that these are the only RAM bytes that
-differ).
+differ). The rope is the one piece of background that the game also draws
+without a metatile: while a balance lift moves down, a routine queues the two
+rope tiles above it directly (and blank tiles while it moves up). Its four
+immediate operands now name the blank tile.
 
 ### 3.2 Sprite tiles: which object draws them (CHR-ROM, pattern table `$0000`)
 
@@ -109,25 +129,52 @@ use sprite palette 2). Categories are therefore separated by *index* within a
 palette, and the palettes of section 3.4 give each index its colour. Mario's
 tiles use index 1 because the star-power effect rotates Mario's palette
 *attribute* through the four sprite palettes; with index 1 he flashes light
-blue / dark green / green / orange rather than enemy red.
+blue / dark green / green / grey rather than enemy red.
 
 Four palettes with three indices each give twelve sprite colours, but the
 game's own palette assignments crowd some categories into the same palette.
 Where that prevented a category from having its own colour, we changed the
-palette the game assigns to the object. Each of these is a single immediate
-operand or table byte in the drawing routine of that object: the fireball now
-uses sprite palette 0 (Mario's) and index 3; coins popping out of blocks use
-palette 3 and index 3; the bumped brick uses palette 2 and index 3 (terrain
-colour, since no sprite palette has a slot left for the brick grey); the
-bumped question block always uses palette 3 (the original used palette 1
-outside ground areas); the vine uses palette 2 and index 3 (terrain: it is a
-climbable solid); floating score numbers use palette 3 and index 3 (coin
-colour); the fire flower and the star use palette 0 (index 3, the fire-Mario
-deep blue, and index 2, pale pink) and the routine that cycles their top row through
-the four palettes every two frames now always selects palette 0. The 1-up and
-the super mushroom share their tiles and are told apart by the game with the
-palette (1 vs 2), so index 1 of palette 1 is a dedicated 1-up colour. The
-brick debris sprites are transparent.
+palette the game assigns to the object. The game chooses a sprite's palette
+in three ways, all of them presentation data that reaches nothing but the
+sprite buffer:
+
+* *an immediate operand* in the drawing routine of the object. The fireball
+  uses sprite palette 0 (Mario's) and index 3; the coin popping out of a
+  block (two sprites) and the "200" that follows it use palette 3 and
+  index 3, as do the floating score numbers (coin colour); the vine uses
+  palette 3 and index 2 (interactive); the fire flower and the star use
+  palette 0 (index 3, the fire-Mario deep blue, and index 2, pale pink) and
+  the routine that cycles their top row through the four palettes every two
+  frames now always selects palette 0;
+* *the enemy attribute table*, one byte per enemy graphic, which the enemy
+  drawing routine ORs into the sprite attribute. Buzzy Beetle, Goomba,
+  Bloober and Bullet Bill leave palette 3 for palette 2 (4 bytes; both hold
+  the enemy colour at index 2), which frees index 2 of palette 3 for the
+  interactive colour, and the three springboard frames enter palette 3
+  (3 bytes). Two special cases of that routine bypass the table and needed
+  their own operand changed: the cannon-fired Bullet Bill (hard-coded
+  palette 3) and the two lower rows of the springboard (hard-coded
+  palette 2);
+* *small per-object tables*: the power-up attribute table (the 1-up and the
+  super mushroom share their tiles and are told apart by the game with the
+  palette, 1 vs 2, so index 1 of palette 1 is a dedicated 1-up colour) and
+  the hammer attribute table (palette 3 to 2).
+
+A block that is hit from below is drawn as a sprite while it bounces, by one
+routine (`DrawBlock`): it draws the brick tiles and, if the block is turning
+into a used block (a question block, a brick that held an item, a hidden
+block), redraws it with the used-block tile. The bouncing block is thus
+already what it becomes, and is coloured accordingly: the used block uses
+palette 2 and index 3 (terrain; one operand), the brick keeps the game's own
+palette 3, whose index 1 is the brick colour.
+
+The brick debris, the fireworks, the castle flag and the air bubbles of the
+underwater areas are transparent. Sprite 0, two rows of pixels that complete
+the coin icon of the status bar and that the game uses to time the screen
+split below the status bar, keeps its shape (the timing depends on it) and
+takes the coin colour. The floating score digits keep their glyph, including
+the "00" of the scores of 1000 and more, a tile also used by the flagpole
+score.
 
 ### 3.3 Sprite tiles: rectangles that fit the collision box
 
@@ -155,9 +202,13 @@ the flip bit, so a tile used on both sides of an object is consistent once
 flips are folded). Objects whose state disables collisions (defeated enemies
 falling off screen, squished Goombas) and frames during the grow/shrink
 animation were excluded. The dominant geometry per tile is the `HITBOX` table
-of `code/simplify_rom.py` (182 tiles); tiles that never appear in the dataset
-(swimming Mario, Bloober) were placed from the graphics tables, and castle
-objects (Bowser, Podoboo, flames, fire bars) were left as full squares. The
+of `code/simplify_rom.py` (187 tiles); the tiles of big swimming Mario, who
+never appears in the dataset, were placed from the graphics tables, and castle
+objects (Bowser, Podoboo, flames, fire bars) were left as full squares. Every
+drawn rectangle was then compared with its box on the simplified ROM
+(`code/audit_colours.py`, section 5), which corrected the entries of three
+objects whose tiles the survey could not place: the Bloober, the hammer and
+the Bullet Bill (see below and section 7). The
 box sizes that result, with the size of the drawn sprite for comparison:
 
 | Object | Collision box | Drawn sprite |
@@ -171,6 +222,15 @@ box sizes that result, with the size of the drawn sprite for comparison:
 
 For every object of the first four rows the box lies inside the drawn sprite,
 so the carve is exact. The exceptions are listed in section 7.
+
+One object needed more than a tile rewrite to be drawn on its box. The hammer
+is a pair of sprites that spins around a 8x8 box located at the object's
+position: in every frame half of one sprite lies in the box and the other
+sprite lies outside it, and each tile takes both roles in turn, so no
+carving fits. The seven 4-byte tables that give, per animation frame, the
+offsets, tiles and attributes of the two sprites now put one full tile on
+the box and make the other sprite blank (15 bytes, read by the hammer's
+drawing routine only).
 
 We used the exclusive convention (a box of width `right - left`), which gives
 the familiar sizes; because the game compares edges inclusively, two boxes
@@ -220,20 +280,31 @@ every palette index means the same category everywhere:
 
 | index | BG pal 0 | BG pal 1 | BG pal 2 | BG pal 3 | SPR pal 0 | SPR pal 1 | SPR pal 2 | SPR pal 3 |
 |---|---|---|---|---|---|---|---|---|
-| 1 | item | brick | text (white) | ?-block | Mario | 1-up | item | ?-block |
-| 2 | terrain | terrain | terrain | terrain | star | enemy | enemy | enemy |
-| 3 | goal | goal | goal | coin | fire Mario | goal | terrain | coin |
+| 1 | (item) | brick | text (white) | interactive | Mario | 1-up | item | brick |
+| 2 | terrain | terrain | terrain | terrain | star | enemy | enemy | interactive |
+| 3 | goal | launcher | (goal) | coin | fire Mario | goal | terrain | coin |
 
-The backdrop is black in every area, on the "WORLD x-y" screens included.
-Terrain is white rather than the natural brown so that it sits far from enemy
-red (the two were adjacent NES hues of similar brightness), and the player is
-blue. NES colour indices: backdrop `$0F`, terrain `$30`, brick `$10`,
-?-block `$27`, coin `$28`, item `$2A`, 1-up `$1A`, star `$35`, enemy `$16`,
-Mario `$21` (light blue), fire Mario, fireballs and fire flower `$12` (a deep
-blue, so the change of state is visible without breaking the "player"
-family), goal `$24`. HUD text shares the terrain white; the HUD is outside
-the play area. They are the `C` dictionary at the top of
-`code/simplify_rom.py`.
+(The two entries in parentheses are not used by any tile.) The backdrop is
+black in every area, on the "WORLD x-y" screens included. Terrain is white
+rather than the natural brown so that it sits far from enemy red (the two
+were adjacent NES hues of similar brightness), and the player is blue. NES
+colour indices: backdrop `$0F`, terrain `$30`, brick `$10`, interactive `$17`
+(dark orange), coin `$38` (light yellow), item `$2A`, 1-up `$1A`, star `$35`,
+launcher `$06` (dark red), enemy `$16`, Mario `$21` (light blue), fire Mario,
+fireballs and fire flower `$12` (a deep blue, so the change of state is
+visible without breaking the "player" family), goal `$24`. HUD text shares
+the terrain white; the HUD is outside the play area. They are the `C`
+dictionary at the top of `code/simplify_rom.py`.
+
+Two of these choices are a compromise. The interactive dark orange is the
+NES hue next to the enemy red, at the same brightness; the two never share a
+shape (question blocks are static 16x16 squares, enemies smaller moving
+rectangles). The colour of the previous version, orange `$27`, sat next to
+the coin yellow `$28`, and question blocks read as coins; the coins moved to
+a lighter yellow at the same time. The launcher dark red is in the enemy family on purpose: a barrel is
+where enemies come from, and it is solid like terrain. Question blocks and
+coins do not pulse as they do in the original: the tables the game rotates
+into background palette 3 hold a single colour.
 
 ### 3.5 Sound
 
@@ -299,130 +370,301 @@ byte, i.e. everything the game logic computes, must still match, and does
 | iNES header | 0 | |
 | PRG-ROM level data | 0 | |
 | PRG-ROM game logic | 6 | operands at the four sites that queue the swim, pipe-entry and fireworks sounds |
-| PRG-ROM sound engine | 966 | sound-effect handler region (731, of which 267 bytes of new code and tables, the rest `$FF`), its call sites (12), tune headers (95) and data (84), envelope tables (32) and constants (5), area-tune selection table (6) |
-| PRG-ROM presentation data | 199 | palette tables (156), metatile-graphics table (32), enemy-graphics and power-up-attribute tables (4), sprite-palette operands (7) |
-| CHR-ROM | 5528 | tile shapes |
+| PRG-ROM sound engine | 965 | sound-effect handler region (731, of which 267 bytes of new code and tables, the rest `$FF`), its call sites (12), tune headers (95) and data (84), envelope tables (32) and constants (5), area-tune selection table (6) |
+| PRG-ROM presentation data | 219 | palette tables (136), metatile-graphics table (42), rope tile operands (4), sprite palette, tile and position tables and operands (37) |
+| CHR-ROM | 5513 | tile shapes (255 sprite tiles and 152 background tiles rewritten) |
 
-The seven operands are the immediate values that select a sprite palette for
-fireballs, block coins, bumped bricks, bumped ?-blocks, vines and floating
-score numbers, and the mask of the palette-cycling routine of the fire flower
-and star. The enemy-graphics table change blanks the top row of the second
-Bloober frame, whose tile is a body tile in the first frame.
+The 37 bytes of the last group of presentation data are the power-up
+attribute table (2), the enemy attribute table (7), the enemy-graphics table
+(2: the top row of the second Bloober frame is blanked, because its tile is
+a body tile in the first frame), the seven hammer tables (15) and eleven
+bytes of the drawing routines: the immediate values that select a sprite
+palette for the fireball, the two sprites of a block coin, its score, the
+bumped used block (and the shift that followed it, now a no-operation), the
+vine, the floating score numbers, the cannon-fired Bullet Bill and the lower
+rows of the springboard, and the mask of the palette-cycling routine of the
+fire flower and star. `simplify_rom.py --summary` prints these counts.
 
 ## 4. Reproducibility
 
 `code/simplify_rom.py ORIGINAL.nes OUTPUT.nes` rebuilds the ROM
 deterministically from the original ROM (md5 `811b027eaf99c2def7b933c5208636de`)
 and the tables in the script; every PRG patch asserts the original bytes
-before writing. The current ROM has md5 `e0d177c472ea7ca7540fcfd0b6141006`
-(`626c679210364593883e8be91dac7f99` with `--no-sound`, i.e. the previous
-version with the original sound). The sound-effect handler is written as
-assembly text in the script and assembled at build time by a 40-line
-assembler that covers the fifteen instructions it uses; no external tool is
-needed.
+before writing. The current ROM has md5 `a408d0f1858dd9267bae490c5459fb8f`
+(`f08e5c0bbf52e7c3a0d1596725aa5aec` with `--no-sound`, i.e. with the original
+sound). The sound-effect handler is written as assembly text in the script
+and assembled at build time by a 40-line assembler that covers the fifteen
+instructions it uses; no external tool is needed.
 The tool used for the earlier, hand-made versions of this ROM (SMB Utility)
-is no longer needed.
+is no longer needed. The figures of this document and of the manuscript are
+regenerated by `code/make_figures.py`.
 
 ## 5. Verification
 
-`code/verify_replays.py` replays a participant recording on the original and
-the simplified ROM with the same emulator (stable-retro 1.0, `fceumm` core),
-starting from the recording's own initial savestate, and compares the full
-emulator RAM after every frame. It also saves a state halfway through the run
-on the original ROM, loads it into the simplified ROM and replays the
-remaining inputs.
+Three tools replay recordings with the same emulator (stable-retro 0.9.8,
+`fceumm` core) and check that the game logic is untouched (5.1), that the
+picture is what the legend says (5.2) and that the sound is (5.3). Section 5.4
+is about savestates. The reference set is the 3374 recordings of the mario
+dataset (18,132,655 frames, 5 participants, 22 levels), which also reach the
+bonus rooms of those levels (underground, cloud and underwater) and, in one
+recording that runs on after the flagpole of 3-3, a castle.
 
-Results on recordings from levels 1-1 (including one with fire Mario, star
-power and a completed level), 1-2, 1-3, 3-1, 4-2, 5-1 and 8-2 (1900 to 6000
-frames each), for the ROM before the sound change (`--no-sound`):
+### 5.1 Game logic: `verify_replays.py`
 
-* the only bytes that ever differ lie in the PPU write buffer
-  (`$0300-$03B0`, on the frames where a screen column or a palette is
-  queued; the range reaches `$03B0` when the tall castle columns are queued),
-  in the sprite buffer (`$0200-$02FF`, the tile and attribute bytes of the
-  affected sprites) and in one zero-page scratch byte (`$0004`) in which the
-  block-drawing routine hands the palette to a shared helper. Nothing outside
-  these regions differs on any frame. The sprite buffer, the write buffer and
-  that scratch byte are written by the graphics path and never read by game
-  logic; in particular the collision boxes at `$04AC-$04DB`, which are
-  compared, are identical;
-* savestates taken on either ROM load on the other and track the original
-  run to the end; the fceumm savestate contains no tile data and no ROM
-  checksum;
-* the 26 loadable level savestates of the repository, played with the same
-  scripted inputs for 600 frames on both ROMs, give identical RAM outside the
-  same three regions;
-* all RAM-derived variables of `data.json` are therefore identical between
-  ROMs, and `.bk2` recordings need no conversion (the recording names the
-  game `SuperMarioBros-Nes`, which both integrations use).
+A recording is replayed on the original and on the simplified ROM, from the
+recording's own initial savestate, and the 2 KB of console RAM are compared
+after every frame. A savestate taken halfway through the run on the original
+ROM is then loaded into the simplified ROM and the rest of the inputs is
+replayed, to check that it tracks the original run.
+
+*When RAM is compared.* The emulator returns once per video frame. On almost
+every frame the CPU is then parked in the game's idle loop (`$8057`, a jump to
+itself, with an empty stack): the interrupt handler has uploaded the graphics,
+run the sound engine and run all the game logic of the frame, so RAM is a
+complete state. On the frames where the logic is not finished (the game takes
+more than one frame to wipe its memory when an area loads, and a few frames of
+heavy play overrun), the two ROMs can be a few CPU cycles apart, because their
+sound code differs, and a snapshot is not comparable: those frames are skipped
+and counted. A divergence would persist and show on the next frame.
+
+*Which bytes may differ.* Everything the game logic computes must be equal.
+The bytes that only describe what is drawn or played are tolerated:
+
+* `$0200-$02FF`, the sprite buffer: tile, attribute and, for the hammer,
+  position bytes of the affected sprites;
+* `$0301-$033F` and `$0341-$0362`, the two PPU write buffers: tile numbers,
+  palette and attribute bytes queued for the graphics chip. Their length bytes
+  (`$0300`, `$0340`) must be equal;
+* `$0363-$03FF`, only where the second buffer reaches. During play these
+  addresses hold game variables (relative positions, off-screen flags, the
+  block being bumped) and are compared. While an area loads, the game queues
+  four columns of the first screen per frame and the buffer grows over them; a
+  byte there may differ if it lies inside the length queued on that frame, or
+  has not been written since it did;
+* `$0004`, a zero-page scratch byte through which the drawing routines pass a
+  sprite's palette;
+* `$00F0-$00FF` and `$07B0-$07CA`, the sound engine's own state. Game logic
+  only writes the queues and reads one byte back, `EventMusicBuffer`, to wait
+  for the death and level-clear tunes; the rewritten tunes keep their frame
+  counts, so a difference there would desynchronise the logic and show
+  everywhere else;
+* `$0160-$01FF`, the CPU stack (the game itself excludes this range when it
+  wipes RAM). In the idle loop the stack is empty and what these bytes hold is
+  left over from routines that have returned.
+
+*Result.* On the 3374 recordings, no other byte differs on any of the
+18,123,537 frames compared, and the savestate check, done for one recording in
+eight (422), tracks to the end in each. 12,492 frames (0.069 %) were not in
+the idle loop and were skipped: 12,376 inside the memory-wiping routine and
+116 elsewhere, in 40 recordings. The latter are frames of heavy play on which
+the logic overran, 98 of them while the game was building a new column of the
+level; the two ROMs were at the same instruction on 43 of them and a few CPU
+cycles apart on the others.
+
+What does differ, by number of recordings: the sound engine's state and the
+PPU write buffers in all of them; the sprite buffer in 3221; the second buffer
+over `$0363-$03B0` in 2950 (the first screen of a level contains a castle, a
+pipe shaft or a springboard, whose tiles changed); scratch `$0004` in 724; and
+one byte of the stack page, `$01F7`, in 1880 (in 4 of them `$01F5` as well).
+`$01F7` is where the original sound-effect routines leave the low byte of a
+return address when they call a helper three levels deep; the replacement
+routine jumps to the helper instead of calling it. `$01F5` is the same thing
+one level deeper, seen while an effect of the original plays on the game-over
+screen. Game logic overwrites these bytes whenever its own calls go as deep,
+which is on most frames, so the difference shows only while the logic is
+shallow (between levels). No code reads the stack page by address.
+
+Three more runs: (i) with `--no-sound`, i.e. the original sound code, on the
+two longest recordings of each level (44 recordings, 161,362 frames), the
+sound engine's state and the stack are identical as well, and only the sprite
+buffer, the write buffers and `$0004` differ; (ii) the 26 level states of this
+repository, each played for 1500 frames with scripted input (run right, jump
+periodically), give identical RAM on both ROMs; (iii) with `--fix-state`,
+which starts the simplified ROM from the recording's initial state as
+rewritten by `fix_state.py` (section 5.4), the run is identical to the
+untouched one on the original ROM (68 recordings, among them 24 that start in
+gameplay).
 
 With tile changes only (the CHR-ROM), RAM is byte-identical on every frame,
 which was checked on the earlier versions of the ROM; the collision-box
 carving of section 3.3 is a CHR-only change.
 
-The sound change (section 3.5) was verified the same way on eight
-recordings of a test participant (levels 1-1 and 3-1, 650 to 4250 frames,
-including four deaths, two completed levels with the level-clear tune and
-the end-of-level wait, an injury, coins, stomps and block hits): outside
-the PPU buffers and the sound-engine RAM, no byte differs on any frame
-between the original ROM and the current ROM, and the mid-run savestate
-tracks. The frames at which `EventMusicBuffer` returns to zero after each
-death and after the flag are the same on both ROMs. The star-power hum and
-the time-warning tune, absent from these recordings, were exercised by
-loading level 1-1, queueing the star tune and setting the game timer to
-101 in the emulator RAM after 300 frames, on both ROMs: the warning tune
-occupies the same 168 frames on both, the hum resumes after it, and the
-rest of RAM stays identical. The two level states captured mid-level (4-1,
-6-x) were played with scripted input on both ROMs, before and after the
-sound fix of `fix_state.py`: RAM identical outside the masked bytes in every
-combination. The audio of each replay was written to a `.wav`
-(`verify_replays.py --wav`) and checked frame by frame: it is silent
-except for one tone at each queued event (the emulator's output filter
-adds a short decaying tail).
+### 5.2 Picture: `audit_colours.py`
 
-Visual checks were made on every level state and on replay frames covering
-day, night, underground, tree-top, bonus and castle-exterior areas, including
-coins, all four power-ups, star power, fire Mario, dying Mario, shells,
-Paratroopas, Spinies, Piranha Plants, Hammer Bros, Lakitu, Bullet Bills and
-score numbers.
+RAM identity says nothing about the picture. This tool replays recordings on
+the simplified ROM and, on every Nth frame, checks the picture object by
+object, using the game's own memory to know what each thing on screen is. Its
+expectations are written from the game's logic, not from the tile tables of
+`simplify_rom.py`.
 
-Three pitfalls met during verification are worth recording. First, the NES
-core exposes nine buttons (`B, -, SELECT, START, UP, DOWN, LEFT, RIGHT, A`);
-a replay script that reads eight drops the A button and produces plausible
-but wrong runs. Second, the game animates question blocks and coins by
-rewriting background palette 3 from its own tables; patching only the area
-palettes leaves those tiles with the original colours. Third, a recording's
-initial savestate (`Core.bin`) carries the PPU palette of the moment it was
-captured, i.e. the original colours, and the game only rewrites the palette
-when an area loads. 3231 of the 3374 dataset recordings start on the
-"WORLD x-y" screen, so the level palette is written about 120 frames later;
-but that first screen itself is drawn with the stored palette (original
-Mario icon colours), whereas every later intermission (after a death) is
-drawn by the simplified ROM (light-blue icon). The other 143
-recordings (79 of them the first repetition of a run) start in gameplay and
-keep the original colours on the simplified ROM until the next area change,
-which makes, for instance, Lakitu white and pipes green.
-`code/fix_state.py` rewrites the 32 palette bytes inside a state or
-`Core.bin` (it locates the fceumm `PRAM` chunk structurally, so it applies
-whatever palette is stored and can be re-run after a colour change); the run
-is RAM-identical afterwards, and applying it to every recording makes both
-cases consistent. The 26 level savestates of this
-repository have been rewritten this way (their game state is untouched; the
-600-frame scripted-play check of this section was repeated with them), so new
-recordings made on the simplified ROM start with the simplified palette. The
-intermission backdrop comes from the same table entry as the underground
-backdrop, which is why one backdrop colour is used for both.
+* *Sprites.* Every sprite of the sprite buffer is attributed to the object
+  that drew it (player, enemy slot, power-up, fireball, bumped block, coin,
+  hammer) through the game's sprite-offset tables, and the colours of its
+  opaque pixels (tile pixels through the palette held by the PPU) must be
+  those of that object's category.
+* *Background.* Every visible 16x16 cell of the name table must be drawn in
+  the category colour of the block that the game holds at that place in its
+  block buffer, and every cell where it holds nothing must be empty, or be
+  text. A mismatch counts once it has lasted 8 frames (the name table lags the
+  block buffer by a few frames when a block changes).
+* *Collision boxes.* The rectangle drawn for each object that has a live box
+  is compared with that box, edge by edge; for Mario, the side of the hole in
+  his rectangle is compared with the side he faces.
+* *Colours.* Every pixel of the rendered frame must have a legend colour.
 
-The same tool handles the sound counterpart of that pitfall. A state
-captured mid-level carries the music that was playing (which tune, and the
-engine's position in its data); on the simplified ROM the engine would go
-on reading the original tune from there until the end of the current
-section. `fix_state.py` clears the sound-effect and music buffers inside
-the state's RAM chunk and queues "Silence", which the engine turns into an
-idle state on the first frame; these seven bytes are never read by game
-logic, so the run is unchanged. The two level states captured mid-level
-(4-1 and 6-x) are rewritten this way; the 24 others were captured on the
-"WORLD x-y" screen with the engine already idle.
+It was run on the final ROM on 338 recordings chosen to cover the dataset (the
+two longest of each participant and level, every recording that enters an
+underwater bonus room or a castle, and enough others for each kind of object
+of each level to be seen at least twice): 2,894,994 frames, every second one
+audited.
+
+* Background: the 101 metatiles of the ROM are drawn in their expected
+  category; in play, 213,214,855 cells are as expected, 4172 are text (the
+  warp-zone messages), 4204 are a block changing, and none is unexpected.
+* Sprites: of 17,425,688 sprites, the only ones in an unexpected colour are
+  the 6223 of the fire bars of the castle (section 7).
+* Collision boxes, as the percentage of frames in which the drawn rectangle is
+  exactly the live box:
+
+  | Object | Frames | Rectangle = box |
+  |---|---|---|
+  | Mario, small (10x12) | 613,295 | 97.3 % |
+  | Mario, big (12x24) | 186,748 | 97.0 % |
+  | Mario, crouching (12x12) | 1563 | 93.2 % |
+  | Goomba | 161,806 | 100 % |
+  | Piranha Plant | 203,785 | 100 % |
+  | Cheep-cheeps | 61,115 | 100 % |
+  | Bloober | 14,010 | 100 % |
+  | Bullet Bill, cannon-fired | 39,963 | 100 % |
+  | Bullet Bill, frenzy | 17,257 | 0.0 % |
+  | Spiny and its egg | 51,112 | 52.2 % |
+  | Koopas and Buzzy Beetle, walking or as a shell | 225,154 | 91.2 % |
+  | Paratroopas | 78,709 | 100 % |
+  | Lakitu (12x12 box) | 35,294 | 100 % |
+  | Lakitu (4x4 box) | 5414 | 0.0 % |
+  | Hammer Bro | 22,440 | 0.0 % |
+  | Hammer | 27,330 | 100 % |
+  | Mario's fireball | 5540 | 100 % |
+  | Super mushroom | 13,854 | 99.5 % |
+  | 1-up mushroom | 5734 | 100 % |
+  | Fire flower | 3844 | 100 % |
+  | Star | 4625 | 100 % |
+  | Lifts | 96,258 | 0.0 % |
+
+  The other frames are the cases of section 7: the box lags the rectangle by a
+  pixel or two while the object moves, the resting shell, Hammer Bro's and the
+  lifts' taller boxes, the Spiny egg, the Bullet Bill of the frenzy levels,
+  the re-created Lakitu. Three rarer ones were looked at. Big Mario in the
+  falling state with the crouch flag still set (he walked off a ledge while
+  crouching) has the crouching box, and the game draws him standing: 58
+  frames. In 67 frames of two recordings of 5-2, only one of the two sprite
+  rows of a super mushroom is on screen, and in 56 frames a Koopa is drawn 4
+  px below its box; these two were not traced. None of the three involves a
+  tile or a table that this version changes.
+* Mario's hole is on the side he faces in all 779,324 frames checked.
+* No rendered frame contains a colour outside the legend.
+
+An earlier build with the same colour tables had been audited on all 3374
+recordings (18.1 million frames, 930 million cells, 75.6 million sprites) with
+the same outcome for colours; its collision-box results are what led to the
+corrections of the hammer, the Bullet Bill and the Bloober, and it found one
+cell, in the whole dataset, where a collected coin stays on screen, which is
+the game's own doing.
+
+### 5.3 Sound: `audit_sound.py`
+
+The fceumm savestate holds the registers of the sound chip, so what each
+channel does on a frame can be read exactly, without analysing audio. On every
+frame, the tool checks that a sound effect that starts sets its channel to the
+pitch, duty and volume that `CUES` gives it, keeps sounding with those values
+on every frame and lasts the number of frames it gives; that a channel is
+audible only while an effect or a tune plays on it (the triangle never); and
+that a tune sounds only the notes `TUNES` gives it.
+
+On the same 338 recordings (2,894,994 frames): 28,147 audible cues started,
+all with the expected pitch, duty and volume; 26,559 lasted their full number
+of frames, 1544 were replaced by a later cue of the same channel, 43 were
+stopped when a tune started (the death tune silences the effects, as in the
+original) and 1 by an area change. The death, game-over, level-clear and
+time-warning tunes and the star-power hum sound their notes and nothing else.
+
+A cue writes the registers of its channel once, where the original effects
+rewrite them on every frame. This has two side effects, which the tool counts.
+
+* *Cues cut off by the music routine.* This concerns cues that last their full
+  number of frames as far as the engine counts them. The music routine is
+  unchanged, and it also writes the channels: the noise channel on every drum
+  beat of an area tune, of which only the star-power tune is left (its beats
+  are silent, i.e. they write a zero volume), and both square channels when a
+  tune ends. A cue that is sounding at that moment is silent from there on,
+  and one that starts on that very frame makes no sound. 27 cues were cut
+  short and 3 made no sound, out of 28,147. 17 of these 30 are brick-shatter
+  cues during star power: of the 37 bricks broken under star power in these
+  recordings, 46 % lost part or all of their sound. The other 13 are cues of
+  the square channels (4 jump, 3 bump, 2 item, 2 hazard, 2 enemy) that were
+  sounding, or starting, when a tune ended.
+* *A left-over tone.* A channel kept a tone for one frame at the start of a
+  recording or across an area change, 14 times.
+
+Nothing else was unexpected.
+
+The audio of a replay can also be written to a `.wav` (`verify_replays.py
+--wav`).
+
+### 5.4 Savestates, and pitfalls
+
+Four pitfalls met during verification are worth recording. First, the NES core
+exposes nine buttons (`B, -, SELECT, START, UP, DOWN, LEFT, RIGHT, A`); a
+replay script that reads eight drops the A button and produces plausible but
+wrong runs. Second, the game animates question blocks and coins by rewriting
+background palette 3 from its own tables; patching only the area palettes
+leaves those tiles with the original colours. Third, the emulator returns a
+240x224 picture, the NES picture without 8 pixels on each side: an overlay
+drawn from the game's coordinates must be shifted by 8. Fourth, a savestate
+carries more than the game's memory, and three parts of it are what the ROM it
+was saved on had produced.
+
+*The palette.* A recording's initial savestate (`Core.bin`) carries the PPU
+palette of the moment it was captured, i.e. the original colours, and the game
+only rewrites the palette when an area loads. 3231 of the 3374 dataset
+recordings start on the "WORLD x-y" screen, so the level palette is written
+about 120 frames later; but that first screen itself is drawn with the stored
+palette (original Mario icon colours), whereas every later intermission (after
+a death) is drawn by the simplified ROM (light-blue icon). The other 143, all
+of level 4-1, whose level state was saved in gameplay, keep the original
+colours on the simplified ROM until the next area change, which makes, for
+instance, Lakitu white and pipes green. `code/fix_state.py` rewrites the 32
+palette bytes inside a state or `Core.bin` (it locates the fceumm `PRAM` chunk
+structurally, so it applies whatever palette is stored and can be re-run after
+a colour change). The intermission backdrop comes from the same table entry as
+the underground backdrop, which is why one backdrop colour is used for both.
+
+*The sound.* A state captured mid-level carries the music that was playing
+(which tune, and the engine's position in its data); on the simplified ROM the
+engine would go on reading the original tune from there until the end of the
+current section. `fix_state.py` clears the sound-effect and music buffers
+inside the state's RAM chunk and queues "Silence", which the engine turns into
+an idle state on the first frame; these seven bytes are never read by game
+logic. (The noise channel can still sound for one frame.)
+
+*The screen.* A state captured mid-level carries the two name tables, i.e. the
+tiles of the screen that was already drawn. The simplified ROM draws a few
+blocks with other tiles than the original (section 3.1): what the original
+drew stays until it scrolls away. Level 4-1 starts next to a large castle,
+which the 143 recordings above therefore show as a wall in the brick colour.
+`fix_state.py` redraws those cells: it reads what each 16x16 cell is from the
+game's block buffer in the same state, redraws the blocks whose tiles changed
+(pipe shafts, springboard base), and blanks, where the game holds no block,
+the tiles that only the castle and the lift ropes use. Only the PPU's memory
+is touched.
+
+The run is RAM-identical after these rewrites (5.1, iii), and applying
+`fix_state.py` to every recording makes all of them consistent;
+`audit_colours.py` and `audit_sound.py` do it themselves. The 26 level
+savestates of this repository are rewritten: the palette in all of them, and
+the sound state and the screen in the two that were saved in gameplay (4-1 and
+6-x), so that new recordings made on the simplified ROM start with its colours
+and without the castle.
 
 ## 6. Semantic information: what is kept, what was added, what is lost
 
@@ -440,7 +682,7 @@ shapes.
 |---|---|---|
 | small / big / crouching | sprite size and pose | kept: box size 10x12 / 12x24 / 12x12 |
 | fire Mario | white-red palette | kept: deep blue |
-| star invincibility | palette flashing | kept: blue / green / orange flashing (the game rotates the palette attribute) |
+| star invincibility | palette flashing | kept: light blue / dark green / green / grey flashing (the game rotates the palette attribute; the same flash plays for a moment when he picks up a fire flower) |
 | hurt invulnerability | Mario blinks | kept (the game skips drawing him every other frame) |
 | facing direction | drawing | added: 2x2 hole on the front side |
 | dying | death pose, then falling | added: hollow rectangle, plus the fall |
@@ -462,7 +704,7 @@ shapes.
 | moving vs resting shell | motion | kept: motion |
 | squished Goomba (harmless) | flat drawing | added: 16x4 bar |
 | killed by fireball, shell or star | drawn upside down, falls through the floor | kept: the rectangle is mirrored within the sprite frame (it jumps up by a few pixels) and falls |
-| hammers | drawing | kept: red 8x8 (half the box lies outside the drawn tile; see section 7) |
+| hammers | drawing, spinning | kept: a red 8x8 square, exactly the box (the spin is gone; see section 3.3) |
 | Piranha inside its pipe | hidden behind the pipe | kept (background-priority bit) |
 | Lakitu's cloud | drawing | removed (decoration) |
 | enemy facing direction | drawing | lost; visible from motion |
@@ -474,16 +716,19 @@ shapes.
 | super mushroom vs 1-up | palette (red vs green) | added: green vs dark green |
 | fire flower | drawing, flashing | added: deep blue, the fire-Mario colour; the flashing is removed |
 | star | drawing, flashing | added: pale pink; the flashing is removed |
-| coins, coins from blocks | drawing | kept: yellow |
-| ?-block vs used block | orange flashing vs brown | kept: orange flashing vs terrain white |
+| coins, coins from blocks | drawing | kept: light yellow |
+| ?-block vs used block | orange flashing vs brown | kept: dark orange vs terrain white (neither pulses) |
+| block that has just been hit | bounces, already drawn as what it becomes | kept: the bouncing block is white if it becomes a used block (question block, brick that held an item, hidden block), grey if it stays a brick |
 | brick vs hard block | drawing | kept: grey vs white |
 | content of a brick or block, hidden blocks | none (invisible in the original) | same as original |
 | enterable pipe | none in the original | same as original |
-| vine (climbable) | drawing | added: terrain white (was item green) |
-| springboard | drawing, compression frames | added: stripes; the compression frames are kept |
+| vine (climbable) | drawing | added: interactive dark orange (the original draws it in the mushroom palette) |
+| springboard | drawing, compression frames | added: interactive dark orange, with stripes; the compression frames are kept; its solid base is terrain white |
 | moving / falling lifts | drawing, motion | kept: white bars, motion |
-| Bullet Bill cannon | drawing | lost as a "danger source": it is solid terrain and drawn as such |
-| flagpole, flag, ball; axe | drawing | kept: purple |
+| which two lifts are linked (balance lifts) | rope and pulleys | lost: the rope is decoration and is transparent; visible from their motion |
+| Bullet Bill cannon | drawing | added: the barrel, where the bullets come out, is dark red (launcher); the pedestal and the column are terrain white |
+| flagpole, flag, ball | drawing | kept: purple |
+| axe (castle levels) | drawing | drawn in the coin colour: its background palette has no goal colour |
 | end-of-level castle | drawing | removed (decoration; the level visibly ends at the flagpole) |
 | pits | absence of ground | same as original |
 | area theme (day, night, underground, water, castle) | palettes and decoration | removed by design; ceilings and walls remain terrain |
@@ -492,8 +737,8 @@ shapes.
 
 | Information | Original cue | Simplified ROM |
 |---|---|---|
-| points earned (100, 200, ..., 1UP) | floating white numbers | kept, in coin yellow (they were enemy red in the previous version); the flagpole score is purple |
-| coin collected, block bumped | sprite animations | kept |
+| points earned (100, 200, ..., 1UP) | floating white numbers | kept, in the coin colour; the flagpole score is purple |
+| coin collected, block bumped | sprite animations | kept (see "block that has just been hit") |
 | brick shattered | debris | lost: debris is decoration and is transparent |
 | level completed | fireworks, castle flag | lost: transparent (decoration) |
 | score, coins, world, time, lives | HUD text | kept |
@@ -518,7 +763,7 @@ shapes.
 | flagpole slide | sound | kept, sustained tone |
 | Bullet Bill fired; Bowser's bridge collapses | share the fireworks sound | one tone |
 | fireworks, end-of-level timer count | sounds | removed (decoration) |
-| brick shattered | noise | kept, noise burst (the debris is transparent) |
+| brick shattered | noise | kept, noise burst (the debris is transparent); often cut off during star power, see section 7 |
 | Bowser's flame | noise | kept, noise burst |
 | pause | jingle | untouched |
 
@@ -526,55 +771,100 @@ shapes.
 
 * **Collision boxes that stick out of the drawn sprite.** Hammer Bro's box
   extends 4 px below his feet; lifts have a 5 px landing-tolerance zone under
-  the bar; a hammer's 8x8 box is offset 4 px from its 8x8 tile so half of it
-  is undrawable; a resting shell has a 1 px strip of box above it; Bowser has
-  a box on his front half only. Drawing those pixels would require extra
-  sprite entries, i.e. code changes, so they are not drawn.
-* **Small residuals.** The cannon-fired Bullet Bill is drawn 1 px higher
-  than the frenzy variant relative to its box, so the latter is 1 px off.
-  The Spiny egg alternates two frames drawn 2 px apart. Lakitu's box control
-  byte switches to the 4x4 Bowser-flame entry in about 12% of his frames
-  (not traced). In about 3% of frames the box lags the sprite by 1 px because
-  the game computes it before the final position update of the frame.
-* **Castle.** The end-of-level castle is decoration and is now fully
-  transparent; the level visibly ends at the flagpole.
+  the bar; a resting shell has a 1 px strip of box above it; Bowser has a box
+  on his front half only. Drawing those pixels would require extra sprite
+  entries, i.e. code changes, so they are not drawn.
+* **Small residuals**, as measured by `audit_colours.py` on the dataset
+  (section 5). The Spiny egg, i.e. the Spiny while it falls from Lakitu, is
+  drawn 10x8 for a 10x6 box, 2 px above it: its four quadrants are two tiles,
+  each used once as is and once mirrored at another height, so no carving fits
+  both uses. A Bullet Bill fired by a cannon is drawn by a special case of the
+  enemy routine, one pixel higher than the Bullet Bill of the "frenzy" levels
+  (5-3 and 6-3), which uses the same tiles: the tiles are carved for the
+  first, far more common, and the second is drawn 1 px below its box. The
+  Paratroopa's wing bar is outside the box on purpose (section 3.3). A Lakitu
+  that the game re-creates after one was defeated has a 4x4 collision box
+  instead of the 12x12 one, and is still drawn 12x12 (13 % of Lakitu's frames
+  in the recordings audited): his set-up ends in the routine that sets up
+  Bowser's flame, which gives him the flame's box (the original game does
+  this). The box of an object can lag its rectangle by 1 to 3 px, because the
+  game computes the box before the final position update of the frame: Mario's
+  rectangle is exactly his box in 97.2 % of his frames.
+* **Castle.** The end-of-level castle is decoration and is transparent. Two
+  things that it hid are therefore visible after the flagpole: the brick
+  that the game puts in the castle doorway to stop Mario's walk (a lone grey
+  block), and Mario himself, who stands beside it while the timer counts
+  down instead of disappearing through the door.
+* **Ropes.** The ropes and pulleys of the balance lifts are transparent, like
+  every other decoration: that two lifts are linked shows only in their
+  motion.
 * **Fire Mario** is deep blue, next to Mario's light blue; his fireballs and
-  the fire flower share that colour. Star power shows as blue / green / orange
-  flashing, because the game rotates Mario's palette attribute and index 1 of
-  each sprite palette is what it is; the star item itself no longer flashes.
-* **Bumped bricks** are drawn in terrain white for the ~10 frames of the bump
-  animation: no sprite palette has a slot left for the brick grey. Bumped
-  ?-blocks stay orange. Brick debris is transparent.
+  the fire flower share that colour. Star power shows as light blue / dark
+  green / green / grey flashing, because the game rotates Mario's palette
+  attribute and index 1 of each sprite palette is what it is; the star item
+  itself no longer flashes.
+* **Interactive vs enemy.** The interactive dark orange and the enemy red
+  are neighbouring NES hues of the same brightness (section 3.4); they are
+  told apart by shape and motion as much as by colour, and may be hard to
+  tell apart for observers with a red-green colour-vision deficiency, as may
+  the dark red of the cannon barrels.
 * **Shared tiles within a category** cannot be told apart: the green and the
   red Koopa, the Buzzy Beetle and the other enemies, all share the category
   colour (section 6).
-* **HUD.** The status line uses the text and ?-block entries, so the coin
-  icon is orange and the text white, like the terrain.
+* **Axe.** The axe of the castle levels is drawn in the coin colour, not in
+  the goal colour: its metatile uses background palette 3, which has no slot
+  left.
+* **HUD.** The status line uses the text and coin entries, so the text is
+  white, like the terrain, and the coin icon has the colour of the coins.
 * **Shape information is reduced to the box.** Objects are distinguished by
   colour, by the size of their collision box and by the shape marks of
   section 3.3; pose is gone.
-* **Savestates carry a palette and the sound state.** A recording's
-  `Core.bin` keeps the original palette until the next area load, which
-  shows on its first "WORLD x-y" screen (original Mario icon colours) and,
-  for recordings that start mid-level, in the level itself; the latter also
-  keep playing the original tune until the end of its current section.
-  Rewrite them with `code/fix_state.py` (section 5). The level states of
-  this repository are already rewritten.
+* **Savestates carry a palette, the sound state and a drawn screen.** A
+  recording's `Core.bin` keeps the original palette until the next area
+  load, which shows on its first "WORLD x-y" screen (original Mario icon
+  colours) and, for recordings that start mid-level, in the level itself;
+  the latter also keep playing the original tune until the end of its
+  current section, and keep on screen what the original ROM had already
+  drawn (castle, pipes, ropes) until it scrolls away. Rewrite them with
+  `code/fix_state.py` (section 5). The level states of this repository are
+  already rewritten.
 * **Sound cues are one tone each.** Pitch, length and duty cycle are the
   only differences between cues, so two cues close in pitch (e.g. the coin
   and the extra life) are told apart mainly by their length; the values in
   `CUES` are meant to be tuned by listening. Cues on the same channel
   interrupt each other, as in the original; a tune note that starts while
-  an effect plays on square 2 is skipped, as in the original.
-* **The sound change is a code change.** Unlike the graphics, which only
-  touch data, the sound-effect handler is new code and six gameplay bytes
-  name a different queue bit. The argument that this is gameplay-neutral is
-  in section 3.5 and was tested in section 5, but it rests on reading the
-  code, not only on the emulator's memory map.
+  an effect plays on square 2 is skipped, as in the original. Two details
+  of the original are not reproduced: when two effects of a channel are
+  queued on the same frame, both ROMs play the lowest queued bit, but the
+  original first gives precedence to bit 7 (the small-Mario jump on square 1,
+  Bowser's fall on square 2); and the original does not let another effect
+  interrupt the extra-life sound.
+* **A cue can be cut off by the music routine.** A cue writes the registers of
+  its channel once, where the original effects rewrite them on every frame,
+  and the music routine, which is unchanged, also writes the channels: the
+  noise channel on every drum beat of the star-power tune (the beats are
+  silent here, they write a zero volume) and both square channels when a tune
+  ends. A cue that is sounding at that moment is silent from there on. In
+  practice this is the brick-shatter cue during star power (17 of the 37
+  bricks broken under star power in the recordings audited) and a handful of
+  other cues at the end of a tune (section 5.3 has the counts). Making the two
+  branches that the music routine takes for a silent beat skip the write (two
+  operand bytes) removes the star-power case; it was tried on three recordings
+  and is not part of this version.
+* **Code changes.** Unlike the tile and palette changes, which only touch
+  data, the sound-effect handler is new code and six gameplay bytes name a
+  different queue bit. The argument that this is gameplay-neutral is in
+  section 3.5 and was tested in section 5, but it rests on reading the code,
+  not only on the emulator's memory map. In the drawing code, one
+  instruction is changed besides operands that name a palette or a tile: a
+  shift of the palette number that became a no-operation of the same size
+  and timing (bumped used block).
 * **Castle levels.** The `Level?-4.state` files, inherited from
   `mario.stimuli`, are not savestates (they are an 813-byte JSON file) and
   cannot be loaded; castle levels are not part of the dataset.
-* **Objects absent from the dataset** (Bloopers and swimming Mario in the two
-  water levels, Bowser, Podoboos, Bowser's flames, fire bars) were placed from
-  the graphics tables or left as full squares, and their rendering was not
-  verified on recordings.
+* **Objects absent from the dataset** (the two water levels, and the castle
+  levels: Bowser, Podoboos, Bowser's flames, fire bars, the axe) were placed
+  from the graphics tables or left as full squares, and their rendering was
+  not verified on recordings. One known defect among them: the fire bars
+  share the drawing routine and the tiles of Mario's fireballs, so they are
+  drawn in the fire-Mario colour instead of the enemy colour.
