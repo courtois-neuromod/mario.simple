@@ -228,7 +228,7 @@ The backdrop is black in every area, on the "WORLD x-y" screens included.
 Terrain is white rather than the natural brown so that it sits far from enemy
 red (the two were adjacent NES hues of similar brightness), and the player is
 blue. NES colour indices: backdrop `$0F`, terrain `$30`, brick `$10`,
-?-block `$27`, coin `$28`, item `$2A`, 1-up `$1A`, star `$2C`, enemy `$16`,
+?-block `$27`, coin `$28`, item `$2A`, 1-up `$1A`, star `$35`, enemy `$16`,
 Mario `$21` (light blue), fire Mario, fireballs and fire flower `$12` (a deep
 blue, so the change of state is visible without breaking the "player"
 family), goal `$24`. HUD text shares the terrain white; the HUD is outside
