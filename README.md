@@ -112,11 +112,13 @@ tail -c +17 SuperMarioBros-Nes/rom.nes | sha1sum | cut -d' ' -f1 > SuperMarioBro
 
 The original ROM is the one annexed in `mario.stimuli`
 (md5 `811b027eaf99c2def7b933c5208636de`). The current simplified ROM has md5
-`a408d0f1858dd9267bae490c5459fb8f` (`f08e5c0bbf52e7c3a0d1596725aa5aec` with `--no-sound`, i.e. with the original sound).
+`2158c12f805918e359b69160299f11d8` (`ac5251830e8b9a3a3c3f3443d41d2e08` with `--no-sound`, i.e. with the original sound).
 `--no-hitbox` gives full-size squares instead of collision-box rectangles,
 `--no-marks` removes the shape cues, `--no-sound` keeps the original music
-and effects. The previous version of the ROM (orange question blocks, white
-cannons, md5 `e0d177c472ea7ca7540fcfd0b6141006`) is commit `93a7ff6`.
+and effects (and the fire bars of the castle levels in the fireball colour:
+their red drawing routine sits in the space that the sound patch frees). The
+previous version of the ROM (orange question blocks, white cannons, md5
+`e0d177c472ea7ca7540fcfd0b6141006`) is commit `93a7ff6`.
 
 After a change of colours, rewrite the level states with the new palette
 (they are annexed, so write to a new file and replace the old one):
@@ -137,9 +139,10 @@ python code/audit_sound.py    --jobs 8 integrations/SuperMarioBros-Nes-simple su
 ```
 
 where each integration folder holds a `rom.nes` next to copies of this repo's
-`*.json` files. Requires stable-retro. The first tool checks that the game
-logic is untouched (same memory on every frame as on the original ROM), the
-other two that what is drawn and played is what the legends above say. Each
+`*.json` files. Requires stable-retro; no window is opened. The first tool
+checks that the game logic is untouched (same memory on every frame as on the
+original ROM, and every sprite at the same place), the other two that what is
+drawn and played is what the legends above say. Each
 exits with status 1 if it finds anything unexpected; see
 [docs/METHOD.md](docs/METHOD.md), section 5, for what they check and their
 results on the whole dataset. Add `--wav DIR` to `verify_replays.py` to also
