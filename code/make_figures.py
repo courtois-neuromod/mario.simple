@@ -70,7 +70,7 @@ GAP = 8
 OVERSCAN = 8      # the emulator returns 240x224 pixels: the NES picture (256x240) without 8 pixels on each side
 
 def make(game):
-    return retro.make(game, state=retro.State.NONE, inttype=retro.data.Integrations.CUSTOM_ONLY, use_restricted_actions=retro.Actions.ALL)
+    return retro.make(game, state=retro.State.NONE, inttype=retro.data.Integrations.CUSTOM_ONLY, use_restricted_actions=retro.Actions.ALL, render_mode="rgb_array")
 
 def grab(game, bk2, frames, fix):
     """{frame: (image, RAM)} of a recording replayed on a ROM."""

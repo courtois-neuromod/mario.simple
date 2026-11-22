@@ -20,7 +20,20 @@ and skipped, and any real divergence would still show on the next frame.
 Which bytes may differ.  Everything the game logic computes must be equal.
 The bytes that only describe what is drawn or played are tolerated:
 
-  $0200-$02FF  the sprite buffer (tile and attribute bytes of each sprite);
+  $0200-$02FF  the sprite buffer: the tile and the attribute byte of each
+               sprite.  The two position bytes (Y, X) must be equal, since
+               the simplified ROM is meant to draw every sprite where the
+               original does, except for: a sprite that is off screen
+               (Y >= $EF) or shows the blank tile ($FC) on both ROMs, whose
+               bytes are left over from an earlier object; the sprites of a
+               hammer (tiles $80-$83 on the original), which the simplified
+               ROM draws as one square on its collision box, 4 px to the
+               left or 4 px up; and those of a Bullet Bill (tiles $E7-$EA)
+               while one fired by a cannon exists, drawn 1 px lower (see
+               $0002).  One position byte is read by game logic and must be
+               equal whatever the sprite shows: $0207, the horizontal
+               position of Mario's first sprite (the fire bars of the castle
+               levels test a hit against it, at $CE46);
   $0301-$033F, $0341-$0362  the two PPU write buffers (tile numbers, palette
                and attribute bytes queued for the graphics chip).  Each starts
                with its length, at $0300 and $0340, which must be equal;
@@ -31,6 +44,14 @@ The bytes that only describe what is drawn or played are tolerated:
                queued on that frame, or has not been written since it was;
   $0004        zero-page scratch through which the drawing routines pass a
                sprite's palette (see SPRITE_PATCHES in simplify_rom.py);
+  $0002        zero-page scratch through which the enemy drawing routine
+               passes the row it draws.  The original ROM raises a Bullet
+               Bill fired by a cannon by one pixel there ("dec $02"), the
+               simplified ROM does not (SPRITE_PATCHES), so the byte is left
+               one higher.  Only that is tolerated: modified = original + 1,
+               on a frame where such a Bullet Bill exists or existed on the
+               frame before, and for as long as neither run writes the byte
+               again (a paused game);
   $00F0-$00FF, $07B0-$07CA  the sound engine's own state (queues, buffers,
                music pointers, counters).  Game logic only writes the queues
                and reads one byte back, EventMusicBuffer ($07B1), to wait for
@@ -68,9 +89,11 @@ except ImportError:
 
 IDLE = (0x8057, 0xFF)                   # EndlessLoop: jmp EndlessLoop, with an empty stack
 INIT_MEMORY = range(0x90CC, 0x90E6)     # InitializeMemory, the only routine known to span a frame boundary
-SPRITES = range(0x200, 0x300)
+SPRITES = [a for a in range(0x200, 0x300) if a != 0x207]    # $0207 is read by game logic: see above
+OFF_SCREEN, BLANK, HAMMER, BULLET = 0xEF, 0xFC, range(0x80, 0x84), range(0xE7, 0xEB)   # sprite Y from which nothing is drawn; sprite tiles
 SOUND = list(range(0xF0, 0x100)) + list(range(0x7B0, 0x7CB))
 SCRATCH = [0x04]
+ROW, CANNON_BULLET, ENEMY_ID = 0x02, 0x33, range(0x16, 0x19)      # scratch $02; a Bullet Bill fired by a cannon lives in enemy slots 0-2
 STACK = range(0x160, 0x200)
 BUFFERS = list(range(0x301, 0x340)) + list(range(0x341, 0x363))   # PPU write buffers 1 and 2, the part nothing else uses
 BUFFER2, SHARED = 0x341, 0x363                                    # buffer 2 (length at $0340) can extend over $0363-$03FF
@@ -78,7 +101,7 @@ REG_PC, REG_S = b"PC\0\0" + (2).to_bytes(4, "little"), b"S\0\0\0" + (1).to_bytes
 
 def make(game):
     return retro.make(game, state=retro.State.NONE, inttype=retro.data.Integrations.CUSTOM_ONLY,
-                      use_restricted_actions=retro.Actions.ALL)
+                      use_restricted_actions=retro.Actions.ALL, render_mode="rgb_array")
 
 def inputs(bk2, nbuttons):
     m = retro.Movie(bk2); m.step(); keys = []
@@ -110,6 +133,16 @@ def run(game, core, keys, save_at=None, wav=None, resume=None):
             w.setnchannels(a.shape[1]); w.setsampwidth(2); w.setframerate(int(env.em.get_audio_rate())); w.writeframes(a.tobytes())
     env.close(); return np.array(rams), np.array(regs), saved
 
+def placed_elsewhere(o, m, shot):
+    """Which of the 64 sprites may have other position bytes (Y, X) on the modified ROM (see the module docstring).
+    o, m: RAM of the frame on the two ROMs; shot: a Bullet Bill fired by a cannon exists, or did on the frame before."""
+    o, m = o[0x200:0x300].reshape(64, 4).astype(np.int16), m[0x200:0x300].reshape(64, 4).astype(np.int16)
+    dy, dx = (m[:, 0] - o[:, 0]) & 0xFF, (m[:, 3] - o[:, 3]) & 0xFF
+    unseen = ((o[:, 0] >= OFF_SCREEN) & (m[:, 0] >= OFF_SCREEN)) | ((o[:, 1] == BLANK) & (m[:, 1] == BLANK))
+    hammer = np.isin(o[:, 1], HAMMER) & (((dy == 0) & (dx == 0xFC)) | ((dy == 0xFC) & (dx == 0)))
+    bill = np.isin(o[:, 1], BULLET) & (dy == 1) & (dx == 0) & shot
+    return unseen | hammer | bill
+
 def compare(ro, co, rm, cm, first=0):
     """Compare two runs frame by frame (see the module docstring).  Returns a dict:
     bad: [(frame, address, original, modified)...] differences that are not tolerated (first 50),
@@ -121,6 +154,7 @@ def compare(ro, co, rm, cm, first=0):
     idle = (co[:, 0] == IDLE[0]) & (co[:, 1] == IDLE[1]) & (cm[:, 0] == IDLE[0]) & (cm[:, 1] == IDLE[1])
     skipped = Counter((int(a), int(b)) for a, b in zip(co[~idle, 0], cm[~idle, 0]))
     explained = np.zeros(0x400 - SHARED, bool)                     # $0363-$03FF: byte currently explained as content of buffer 2
+    bullet = (ro[:, list(ENEMY_ID)] == CANNON_BULLET).any(axis=1); row = False   # $0002: currently explained as the row of a cannon-fired Bullet Bill
     bad, bad_frames, bad_addr, tol = [], 0, Counter(), {}
     def note(name, addrs):
         if len(addrs):
@@ -133,16 +167,23 @@ def compare(ro, co, rm, cm, first=0):
         else:
             untouched = (ro[f, SHARED:0x400] == ro[f - 1, SHARED:0x400]) & (rm[f, SHARED:0x400] == rm[f - 1, SHARED:0x400])
             explained = queued | (explained & untouched)
+        row = bool(bullet[f] or (f and bullet[f - 1]) or (row and f and ro[f, ROW] == ro[f - 1, ROW] and rm[f, ROW] == rm[f - 1, ROW]))
         if not idle[f]: continue                                   # mid-logic: not comparable (the bookkeeping above still runs)
         d = ro[f] != rm[f]
         if not d.any(): continue
         ok = always.copy(); ok[SHARED:0x400] = explained
+        ok[ROW] = row and (int(rm[f, ROW]) - int(ro[f, ROW])) & 0xFF == 1
+        if d[0x200:0x300:4].any() or d[0x203:0x300:4].any():      # a sprite is drawn elsewhere: only where that is meant ($0207 stays strict)
+            free = placed_elsewhere(ro[f], rm[f], bool(bullet[f] or (f and bullet[f - 1])))
+            ok[0x200:0x300:4] &= free; ok[0x203:0x300:4] &= free
         v = np.where(d & ~ok)[0]
         if len(v):
             bad_frames += 1; bad_addr.update(int(a) for a in v)
             if len(bad) < 50: bad += [(int(f) + first, int(a), int(ro[f, a]), int(rm[f, a])) for a in v[:10]]
         a = np.where(d & ok)[0]
         for name, _ in regions: note(name, a[region_of[a] == name])
+        note("scratch $02, cannon-fired Bullet Bill", a[a == ROW])
+        note("sprite positions", a[(a >= 0x200) & (a < 0x300) & ((a & 3) % 3 == 0)])
         b = a[a >= SHARED] if len(a) else a; b = b[b < 0x400]
         note("buffer 2 over $0363-$03FF, queued", b[queued[b - SHARED]]); note("buffer 2 over $0363-$03FF, leftover", b[~queued[b - SHARED]])
     return dict(bad=bad, bad_frames=bad_frames, bad_addresses={f"${a:04X}": n for a, n in sorted(bad_addr.items())},

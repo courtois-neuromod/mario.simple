@@ -45,7 +45,7 @@ def main():
     for bk2 in replays:
         core = zipfile.ZipFile(bk2).read('Core.bin'); m = retro.Movie(bk2); m.step()
         env = retro.make(game, state=retro.State.NONE, inttype=retro.data.Integrations.CUSTOM_ONLY,
-                         use_restricted_actions=retro.Actions.ALL)
+                         use_restricted_actions=retro.Actions.ALL, render_mode="rgb_array")
         env.initial_state = core; env.reset(); f = 0
         while m.step():
             env.step([m.get_key(i, 0) for i in range(env.num_buttons)]); f += 1

@@ -206,7 +206,7 @@ def live_box(kind, slot, r):
     return None
 
 def audit(game, bk2, rom, every=2):
-    env = retro.make(game, state=retro.State.NONE, inttype=retro.data.Integrations.CUSTOM_ONLY, use_restricted_actions=retro.Actions.ALL)
+    env = retro.make(game, state=retro.State.NONE, inttype=retro.data.Integrations.CUSTOM_ONLY, use_restricted_actions=retro.Actions.ALL, render_mode="rgb_array")
     core = fs.fix(zipfile.ZipFile(bk2).read("Core.bin"))[0]; env.initial_state = core; env.reset()
     m = retro.Movie(bk2); m.step()
     rgb = palette_rgb(env, core); legend_rgb = {rgb[c] for c in LEGEND}; env.initial_state = core; env.reset()

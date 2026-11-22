@@ -20,16 +20,21 @@ and checks, on every frame where the game is idle (see verify_replays.py):
            a tune, the triangle never;
   tunes    while a tune plays (death, game over, level clear, time warning,
            star-power hum), square 2 may only sound the notes TUNES gives
-           for it, and the area tunes must be silent.
+           for it, and the area tunes must be silent.  Every event tune that
+           starts must sound its notes for their number of frames, unless an
+           effect was playing on square 2 meanwhile (an effect interrupts a
+           tune note, as in the original): those are counted.
 
 It also counts how often each cue and tune occurred, i.e. the coverage of the
-set of recordings, and two known side effects of the design (a cue writes its
-channel once, where the original effects rewrite it on every frame): the
-music routine, which is unchanged, also writes the channels (both squares
-when a tune ends, the noise channel on every drum beat of the star-power
-tune, silent here), which cuts off a cue that is sounding, or silences one
-that starts on that frame; and a tone can be left over for one frame at the
-start of a recording or across an area change.
+set of recordings, and two things that can happen to a cue because it writes
+its channel once, where the original effects rewrite it on every frame.  The
+music routine can write the same channel, which cuts off a cue that is
+sounding, or silences one that starts on that frame: it did so on both
+squares when a tune ended and on the noise channel on every (silent) drum
+beat of the star-power tune, until simplify_rom.py changed those two places
+(SOUND_SITES, TUNE_END), and the count is kept as a regression check.  And a
+tone can be left over for one frame at the start of a recording or across an
+area change.
 
 Usage:
     audit_sound.py [--jobs N] [--json OUT] MOD_INTEGRATION_DIR REPLAY.bk2 [...]
@@ -68,15 +73,27 @@ def periods(rom_path):
     return {p: (rom[t + p] & 7) << 8 | rom[t + p + 1] for p in range(0, 0x66, 2)}
 
 MUSIC_SILENCE = {1: 0x90, 2: 0x90, 3: 0x10}       # what the unchanged music routine writes to a channel's control register when it silences it
+# Event tunes: frames of sound each one must give (its notes, rests excluded), and the frames those notes span from its start
+TUNE_SOUND = {name: sum(n for note, n in notes if note != "REST") for _, (name, _, notes) in sr.TUNES.items()}
+TUNE_SPAN = {name: sum(n for _, n in notes[:max(i for i, (note, _) in enumerate(notes) if note != "REST") + 1]) for _, (name, _, notes) in sr.TUNES.items()}
 
 def audit(game, bk2, period):
-    env = retro.make(game, state=retro.State.NONE, inttype=retro.data.Integrations.CUSTOM_ONLY, use_restricted_actions=retro.Actions.ALL)
+    env = retro.make(game, state=retro.State.NONE, inttype=retro.data.Integrations.CUSTOM_ONLY, use_restricted_actions=retro.Actions.ALL, render_mode="rgb_array")
     env.initial_state = fs.fix(zipfile.ZipFile(bk2).read("Core.bin"))[0]; env.reset()
     m = retro.Movie(bk2); m.step()
     note_of_period = {period[v]: k for k, v in sr.NOTE.items() if k != "REST"}
     expected_notes = {name: {n for n, _ in notes if n != "REST"} for _, (name, _, notes) in sr.TUNES.items()}
     expected_notes["star power"] = {n for n, _ in sr.HUM}
     cues, bad, known, tunes, heard, examples, starts = Counter(), Counter(), Counter(), Counter(), Counter(), [], Counter()
+    played, inst = Counter(), None                               # event tunes: how each one that started was heard; the one in progress
+    def finish(i, ended=False):
+        want = TUNE_SOUND[i["tune"]]
+        if i["heard"] == want: how = "in full"
+        elif f - i["start"] < TUNE_SPAN[i["tune"]]: how = "cut by the end of the recording" if ended else "replaced by another tune"
+        elif i["effect"]: how = ("not played" if not i["heard"] else "shortened") + ": an effect was playing on square 2"
+        elif i["skipped"]: how = "frames not audited (pause, or an area loading)"
+        else: how = f"{i['heard']} frames of sound, expected {want}"; flag(f"tune '{i['tune']}': {how}")
+        played[(i["tune"], how)] += 1
     def flag(what):
         bad[(what,)] += 1
         if len(examples) < 20: examples.append((f, what))
@@ -97,10 +114,13 @@ def audit(game, bk2, period):
             disturbed = f                                                                         # an area is loading, and the engine may miss a frame
             for cur in playing.values():
                 if cur: cur["lag"] += 1
+            if inst: inst["skipped"] = True
             continue
         r = env.get_ram(); frames += 1
         if r[0x772] != 3: disturbed = f
-        if r[0x776] & 1: continue                                # game paused: the pause jingle is the original one
+        if r[0x776] & 1:                                         # game paused: the pause jingle is the original one
+            if inst: inst["skipped"] = True
+            continue
         psg, enabled = st.get(b"PSG\0", 16), st.get(b"ENCH", 1)[0]
         length = [int.from_bytes(st.get(b"LEN%d" % k, 4), "little") for k in range(4)]
         square = lambda k: bool(enabled >> k & 1 and length[k] and (psg[4 * k] & 0x0F or not psg[4 * k] & 0x10))
@@ -146,6 +166,11 @@ def audit(game, bk2, period):
         # ---- tunes
         tune = EVENT_TUNES.get(event) if event else (AREA_TUNES.get(area) if area else None)
         if event and tune is None: tune = f"event ${event:02X}"
+        if inst and inst["event"] != event: finish(inst); inst = None                        # ---- event tunes: did the notes of this one sound?
+        if event and inst is None and tune in TUNE_SOUND: inst = dict(event=event, tune=tune, start=f, heard=0, effect=False, skipped=False)
+        if inst and f - inst["start"] < TUNE_SPAN[tune]:
+            if r[0xF2]: inst["effect"] = True
+            elif audible["square 2"]: inst["heard"] += 1
         if tune:
             tunes[tune] += 1
             if audible["square 2"] and not r[0xF2]:
@@ -153,10 +178,11 @@ def audit(game, bk2, period):
                 if note not in expected_notes.get(tune, set()): flag(f"tune '{tune}': square 2 sounds {note}, expected {sorted(expected_notes.get(tune, set())) or 'silence'}")
     for c in CHANNELS:
         if playing[c] is not None: cues[(playing[c]["name"], "cut by the end of the recording")] += 1
+    if inst: finish(inst, ended=True)
     env.close()
     j = lambda c: [[list(k), n] for k, n in c.most_common()]
     return dict(replay=os.path.basename(bk2), frames=f, audited=frames, cues=j(cues), bad=j(bad), known=j(known), starts=j(starts),
-                tunes=j(Counter({(k,): n for k, n in tunes.items()})), heard=j(heard), examples=examples)
+                tunes=j(Counter({(k,): n for k, n in tunes.items()})), heard=j(heard), played=j(played), examples=examples)
 
 def _job(args):
     parent, game, bk2 = args
@@ -167,7 +193,7 @@ def _job(args):
 
 def report(results, out=sys.stdout):
     p = lambda *a: print(*a, file=out)
-    tot = {k: Counter() for k in ("cues", "bad", "known", "tunes", "heard", "starts")}; frames = audited = 0; errors = []
+    tot = {k: Counter() for k in ("cues", "bad", "known", "tunes", "heard", "starts", "played")}; frames = audited = 0; errors = []
     for r in results:
         if "error" in r: errors.append(r); continue
         frames += r["frames"]; audited += r["audited"]
@@ -185,6 +211,11 @@ def report(results, out=sys.stdout):
     for (tune,), n in tot["tunes"].most_common():
         notes = ", ".join(f"{note} ({k} frames)" for (t, note), k in sorted(tot["heard"].items()) if t == tune) or "silent"
         p(f"   {tune:14s} {n:9d} frames   {notes}")
+    p("\n== event tunes: how the notes of each one that started were heard")
+    per = {}
+    for (tune, how), n in tot["played"].items(): per.setdefault(tune, Counter())[how] += n
+    for tune in sorted(per, key=lambda t: -sum(per[t].values())):
+        p(f"   {tune:14s} x{sum(per[tune].values()):<6d} {TUNE_SOUND[tune]:3d} frames of sound   " + ", ".join(f"{how} {n}" for how, n in per[tune].most_common()))
     p(f"\n== known side effects of writing a channel once per cue: {sum(tot['known'].values())}")
     for (what,), n in tot["known"].most_common(): p(f"   x{n:<8d} {what}")
     star = Counter({name: n for (name, when), n in tot["starts"].items() if when})
