@@ -56,15 +56,21 @@ How the ROM is changed
 * CHR-ROM (tile graphics) is rewritten from the tables below.
 * Sound (PRG-ROM $F2D0-$FFFF, the sound engine): the three sound-effect
   handlers are replaced by one table-driven routine assembled at build time,
-  the tune data and headers are rewritten for the unchanged music handler,
-  and five 1-6 byte operands are changed (the area-music selection table,
-  the queue bit of the swim stroke, of pipe entry and of fireworks, and two
-  envelope constants).  This is the only code the build changes.  It is
-  gameplay-neutral because game logic only ever writes the sound queues and
-  reads back one byte, EventMusicBuffer, to wait for the death and
-  level-clear tunes, whose lengths are preserved (asserted).  The sound
-  engine's RAM ($F0-$FF, $07B0-$07CA) does differ from the original ROM and
-  is masked by verify_replays.py; every other byte still matches.
+  the tune data and headers are rewritten for the music handler, and five
+  1-6 byte operands are changed (the area-music selection table, the queue
+  bit of the swim stroke, of pipe entry and of fireworks, and two envelope
+  constants).  The music handler is unchanged but for three places where it
+  would silence a cue that is playing (a cue writes its channel once, the
+  original effects rewrite theirs on every frame): the silent drum beats no
+  longer write the noise channel, the end of a tune no longer silences a
+  square channel that is playing an effect, and the death tune clears the
+  effect of square 2 instead of only stopping it (see SOUND_SITES, TUNE_END
+  and SFX_CALLS).  All of this is gameplay-neutral because game logic only
+  ever writes the sound queues and reads back one byte, EventMusicBuffer,
+  to wait for the death and level-clear tunes, whose lengths are preserved
+  (asserted).  The sound engine's RAM ($F0-$FF, $07B0-$07CA) does differ
+  from the original ROM and is masked by verify_replays.py; every other
+  byte still matches.
 * PRG-ROM otherwise: only *presentation data* is patched, never code paths
   or level data:
     - the 4 area palette sets, the day/night snow and mushroom palette
@@ -80,26 +86,37 @@ How the ROM is changed
       that draws the same rope tiles as a lift moves), and 4 so the solid
       base of a springboard is drawn with a terrain tile instead of the brick
       tile;
-    - 2 bytes of the enemy graphics table (Bloober frame 2), the 4-byte
-      power-up attribute table, 7 bytes of the 27-byte enemy attribute table
-      (Buzzy Beetle, Goomba, Bloober and Bullet Bill leave sprite palette 3
-      for palette 2, the three springboard frames enter it) and the 4-byte
-      hammer attribute table (palette 3 -> 2);
+    - 6 bytes of the enemy graphics table (Bloober frame 2; one tile per
+      quadrant of the Spiny egg), the 4-byte power-up attribute table, 7
+      bytes of the 27-byte enemy attribute table (Buzzy Beetle, Goomba,
+      Bloober and Bullet Bill leave sprite palette 3 for palette 2, the
+      three springboard frames enter it) and the seven 4-byte hammer tables
+      (one tile on the box, palette 3 -> 2);
     - immediate operands that choose the sprite palette of fireballs, coins
       popping out of blocks, bumped blocks, vines, floating score numbers,
       cannon-fired Bullet Bills, and that stop the fire flower / star
-      palette cycling.
+      palette cycling;
+    - two instructions of the drawing code, each replaced by one of the
+      same size and timing: the shift that halved the palette number of a
+      bumped block outside ground areas (now a no-operation) and the
+      decrement that raised the cannon-fired Bullet Bill by one pixel (now
+      decrements a dead byte);
+    - the fire bars of the castle levels are drawn by a copy of the routine
+      they share with Mario's fireballs, with another tile and palette
+      (FIREBAR): the operand of one "jsr", and 25 bytes in the space freed
+      by the sound-effect handlers (so not with --no-sound).
   These bytes only feed the PPU write buffers ($0300-$03FF while a buffer is
   queued) and the sprite buffer ($0200-$02FF), through zero-page scratch
-  $0004, which game logic never reads back.  RAM outside those buffers and
-  the sound engine's own bytes, .bk2 replays and savestates therefore stay
-  identical to the original ROM (verified on participant replays, see
+  $0002 and $0004 (the row and the palette of the sprite being drawn), which
+  game logic never reads back.  RAM outside those buffers and the sound
+  engine's own bytes, .bk2 replays and savestates therefore stay identical
+  to the original ROM (verified on participant replays, see
   verify_replays.py; audit_colours.py checks the rendering itself).
 
 Usage: simplify_rom.py ORIGINAL.nes OUTPUT.nes [--no-hitbox] [--no-marks] [--no-pipes] [--no-palette] [--no-sound] [--summary]
   --no-hitbox : draw every sprite tile as a full 8x8 square (v5 look)
   --no-marks  : no eye / hollow / teeth / wing / stripe shapes
-  --no-sound  : keep the original music and sound effects
+  --no-sound  : keep the original music and sound effects (and the fire bars in the fireball colour: see FIREBAR)
   --summary   : also print how many bytes changed, per kind of change
 """
 import sys, hashlib
@@ -193,6 +210,8 @@ _spr([0xD6, 0xD9], 3)                              # fire flower (moved to SPR0 
 _spr([0xE0, 0xE1], 2)                              # vine (moved to SPR3 idx2 = interactive)
 _spr(list(range(0x60, 0x64)), 3)                   # coin popping out of a block (moved to SPR3 idx3 = coin)
 _spr([0x64, 0x65], 3)                              # Mario's fireball (moved to SPR0 idx3 = fire-Mario colour)
+_spr([0x82, 0x83], 2)                              # fire-bar segment (castle levels; SPR2 idx2 = enemy).  The original draws it with the fireball tiles;
+                                                   # see FIREBAR below.  These two tiles were hammer frames, which the hammer no longer uses
 _spr([0x87], 3)                                    # bumped block that turns into a used block: it is drawn as the used block (moved to SPR2 idx3 = terrain)
 _spr([0x85, 0x86], 1)                              # bumped brick that stays a brick (SPR3 idx1 = brick)
 _spr([0x84], 0)                                    # brick debris: transparent
@@ -236,15 +255,19 @@ HITBOX = {
     0x69:(-2,-9,12,12), 0x6A:(-2,-1,12,12), 0x6B:(-2,-9,12,12), 0x6C:(-2,-1,12,12),
 # Lakitu (12x12)
     0xB8:(6,-9,12,12), 0xB9:(-2,-9,12,12), 0xBA:(6,-1,12,12), 0xBB:(-2,-1,12,12), 0xBC:(-2,7,12,12), 0xBD:(-2,-1,12,12),
-# Spiny and Spiny egg (10x6)
-    0x8E:(-3,-4,10,6), 0x8F:(-3,2,10,6), 0x94:(-3,-4,10,6), 0x95:(-3,2,10,6), 0x96:(-3,-6,10,6), 0x97:(5,-6,10,6),
-    0x98:(-3,2,10,6), 0x99:(5,2,10,6), 0x9A:(-3,-6,10,6), 0x9B:(5,-6,10,6), 0x9C:(-3,2,10,6), 0x9D:(5,2,10,6),
+# Spiny (10x6; rows -6/2)
+    0x96:(-3,-6,10,6), 0x97:(5,-6,10,6), 0x98:(-3,2,10,6), 0x99:(5,2,10,6), 0x9A:(-3,-6,10,6), 0x9B:(5,-6,10,6), 0x9C:(-3,2,10,6), 0x9D:(5,2,10,6),
+# Spiny egg, i.e. the Spiny while it falls from Lakitu (same box, same rows).  The game draws its left column as is and its right
+# column mirrored both ways (MIRRORED below), and the original table used each tile once on the left and once on the right, at
+# another height, which no carving can fit.  SPRITE_PATCHES gives each of the four quadrants its own tile in both animation
+# frames: $8E top left, $8F top right, $95 bottom left, $94 bottom right.
+    0x8E:(-3,-6,10,6), 0x8F:(5,-6,10,6), 0x95:(-3,2,10,6), 0x94:(5,2,10,6),
 # Cheep-cheep (10x6)
     0xB2:(-3,-6,10,6), 0xB3:(5,-6,10,6), 0xB4:(-3,2,10,6), 0xB5:(5,2,10,6), 0xB6:(-3,-6,10,6), 0xB7:(-3,2,10,6),
-# Bullet Bill, as fired by a cannon: the enemy routine draws that one a pixel above its position ("dec $02" at $E8C2), so its
-# two rows sit at -7 and 1.  The Bullet Bill of the frenzy levels (5-3, 6-3) uses the same tiles at -6 and 2, and is therefore drawn
-# one pixel below its box.  (hitbox_survey.py used to skip the cannon-fired one; the table was fitted to the other.)
-    0xE7:(5,-7,10,6), 0xE8:(-3,-7,10,6), 0xE9:(5,1,10,6), 0xEA:(-3,1,10,6),
+# Bullet Bill (10x6 box; rows -6/2).  The original enemy routine drew the one fired by a cannon a pixel above its position
+# ("dec $02" at $E8C2) and the one of the frenzy levels (5-3, 6-3) at its position, with the same tiles and the same box, so no
+# carving fitted both.  SPRITE_PATCHES makes that instruction decrement a dead byte instead: both are drawn at their position.
+    0xE7:(5,-6,10,6), 0xE8:(-3,-6,10,6), 0xE9:(5,2,10,6), 0xEA:(-3,2,10,6),
 # fireball (8x8)
     0x64:(0,0,8,8), 0x65:(0,0,8,8),
 # big Mario (12x24 box, rows at -8/0/8/16)
@@ -285,6 +308,7 @@ MARIO_TILES = {t for t in HITBOX if t < 0x50 or 0x58 <= t < 0x60 or 0x90 <= t < 
 HOLLOW   = {0x6D, 0x6E, 0x6F, 0xF4, 0xF5, 0x9E, 0x9F}          # Koopa/Buzzy shells, dying Mario: 2-px ring
 SERRATED = set(range(0x96, 0x9E)) | {0x8E, 0x8F, 0x94, 0x95, 0xE5, 0xE6, 0xEB, 0xEC, 0xED, 0xEE}  # Spiny, egg, Piranha: toothed top edge
 WINGS    = {0x69, 0x6B}                                        # Paratroopa wing tiles (row above the box): 8x2 bar
+MIRRORED = {0x8F, 0x94}                                        # tiles the game only draws flipped both ways (right column of the Spiny egg): carved mirrored
 STRIPED  = set(range(0xF0, 0xF4))                              # springboard: 2-px horizontal stripes
 
 # ------------------------------------------------------ PRG data patches --
@@ -327,6 +351,15 @@ SPRITE_PATCHES = {  # file offset: (expected bytes, new bytes) - tables and imme
     0x686B: (bytes([0x01,0x02,0x03,0x02,0x01,0x01,0x03,0x03,0x03,0x01,0x01,0x02,0x02,0x21,0x01,0x02,0x01,0x01,0x02,0xFF,0x02,0x02,0x01,0x01,0x02,0x02,0x02]),
              bytes([0x01,0x02,0x02,0x02,0x01,0x01,0x02,0x02,0x02,0x01,0x01,0x02,0x02,0x21,0x01,0x02,0x01,0x01,0x02,0xFF,0x02,0x02,0x01,0x01,0x03,0x03,0x03])),
     0x68D4: (bytes([0xA9, 0x03, 0xBC, 0x8A, 0x07]),       bytes([0xA9, 0x02, 0xBC, 0x8A, 0x07])),        # cannon-fired Bullet Bill ($E8C4, hard-coded in a special case of the enemy routine): palette 3 -> 2
+    # ... and the instruction just before it, "dec $02", which raised that Bullet Bill by one pixel ($02 holds the row being drawn):
+    # it becomes "dec $04", same size and timing.  $04 is rewritten 4 instructions later ("sta $04" at $E8CD) on both paths, and
+    # the flags it sets are overwritten by the "lda" that follows.  Side effect: $02 ends the routine one higher than on the
+    # original ROM (see verify_replays.py).
+    0x68D2: (bytes([0xC6, 0x02]),                         bytes([0xC6, 0x04])),
+    # enemy graphics table, Spiny egg, frames 1 and 2 (rows of 2 tiles; the first row is blank).  One tile per quadrant, and the
+    # same four in both frames (see HITBOX):
+    0x677E: (bytes([0xFC,0xFC,0x8F,0x8E,0x8E,0x8F, 0xFC,0xFC,0x95,0x94,0x94,0x95]),
+             bytes([0xFC,0xFC,0x8F,0x8E,0x94,0x95, 0xFC,0xFC,0x8F,0x8E,0x94,0x95])),
     0x6B64: (bytes([0xA9, 0x82, 0x99, 0x0A, 0x02]),       bytes([0xA9, 0x83, 0x99, 0x0A, 0x02])),        # springboard, its two lower rows ($EB54, hard-coded): palette 2 -> 3
     # Hammer ($E4C0, seven 4-byte tables indexed by animation frame, read only by DrawHammer): X and Y offsets of its first sprite,
     # X and Y offsets from the first to the second sprite, tile of each, attributes.  The original spins a 8x16 hammer around a 8x8
@@ -399,7 +432,9 @@ SFX_CODE = (0xF3B1, 0xF691)        # CPU range of the three original sfx handler
 SFX_CODE_SHA1 = "8b205259690963863a944d7073675d1568d8c202"
 SFX_CALLS = {                      # file offset: (expected jsr operands, new targets by label)
     0x735B: ("20 1B F4 20 7C F5 20 67 F6", ['H1', 'H2', 'H3']),   # RunSoundSubroutines: Square1SfxHandler, Square2SfxHandler, NoiseSfxHandler
-    0x76BB: ("20 A7 F4 20 71 F5",          ['S1', 'T2']),         # LoadEventMusic (death): StopSquare1Sfx, StopSquare2Sfx
+    0x76BB: ("20 A7 F4 20 71 F5",          ['S1', 'S2']),         # LoadEventMusic (death): StopSquare1Sfx, StopSquare2Sfx.  The original leaves the buffer of
+                                                                  # square 2 set there, and the music routine skips a note that starts while it is set:
+                                                                  # the death tune is one tone here, and was lost if an effect was playing.  Clear it (S2)
     0x76DC: ("20 A7 F4",                   ['S1']),               # LoadAreaMusic (underground): StopSquare1Sfx
 }
 SOUND_SITES = {  # file offset: (expected, new) - gameplay sites that queue a sound, and music data
@@ -412,7 +447,22 @@ SOUND_SITES = {  # file offset: (expected, new) - gameplay sites that queue a so
              "AD B1 07 29 00 F0 04 A9 04 D0 0C A5 F4 29 7D F0 04 A9 27 D0 02 A9 27"),  # every note starts at envelope index $27
     0x7904: ("AD B1 07 29 08 F0 04 B9 96 FF", "AD B1 07 29 00 F0 04 B9 96 FF"),       # LoadEnvelopeData: castle uses the usual tables too
     0x77B5: ("29 91 D0 13", "29 90 D0 13"),   # square 2 music: death tune goes through the envelope table like the others
+    0x78A3: ("F0 24", "F0 2F"),               # noise music ($F893, $F89F): the two branches taken for a silent drum beat go straight to the
+    0x78AF: ("F0 18", "F0 23"),               # routine's rts instead of writing a zero volume to the noise channel, which cut the brick cue short
 }
+# Two pieces of code are added after the sound-effect handler, in the space the three original handlers leave free:
+#  * TUNE_END.  When a tune is over, the music routine silences both square channels ("lda #$90 / sta $4000 / sta $4004 / rts" at
+#    $F76B).  The original effects rewrite their channel on every frame; a cue writes it once and was cut off.  Those four
+#    instructions become a jump to the same writes, each skipped while an effect is playing on its channel (buffers $F1, $F2).
+#  * FIREBAR.  The fire bars of the castle levels are drawn by the routine that draws Mario's fireballs (DrawFirebar, $ECED, 25
+#    bytes, no jump inside), so they had his colour.  A copy of it with two other operands (tile $82/$83 instead of $64/$65, sprite
+#    palette 2 instead of 0: the enemy colour) is assembled here, and the one "jsr DrawFirebar" of the fire-bar code calls the copy:
+#    same instructions, same timing, and what it writes is a tile and an attribute byte of the sprite buffer.
+TUNE_END = (0x777B, "A9 90 8D 00 40 8D 04 40 60")
+TUNE_END_CODE = "A9 90 A6 F1 D0 03 8D 00 40 A6 F2 D0 03 8D 04 40 60"   # lda #$90 / ldx $F1 / bne +3 / sta $4000 / ldx $F2 / bne +3 / sta $4004 / rts
+FIREBAR = (0xECED, "A5 09 4A 4A 48 29 01 49 64 99 01 02 68 4A 4A A9 02 90 02 09 C0 99 02 02 60")   # DrawFirebar in the original ROM
+FIREBAR_TILE, FIREBAR_PALETTE = 0x82, 0x02
+FIREBAR_CALL = (0x4E18, "20 ED EC")                # FirebarCollision ($CE08): jsr DrawFirebar
 ENV_TABLES = 0xFF96                # EndOfCastleMusicEnvData(4) + AreaMusicEnvData(8) + WaterEventMusEnvData(40): volume per envelope index
 MUSIC_VOL = 6                      # constant volume of every tune note (index 0 stays silent: rests)
 MHD = 0xF90D                       # MusicHeaderData; headers are (length row, data lo, data hi, triangle offset, square-1 offset[, noise offset])
@@ -474,7 +524,8 @@ def asm(src, org, sym):
 
 def sfx_handler(c):
     """One channel's handler: start the cue of the lowest queued bit, else count the playing cue down and stop it.
-    Entry points: H<c> (per frame), S<c> (stop and clear the buffer), T<c> (stop, keep the buffer), as in the original."""
+    Entry points: H<c> (per frame), S<c> (stop and clear the buffer), T<c> (stop, keep the buffer; the original calls it for square 2
+    when the death tune starts, this build calls S2), as in the original."""
     p = CHANNEL[c]
     play = (f"jmp ${p['SETFREQ']:04X}" if p['SETFREQ'] else       # squares: A = pitch -> period registers, then rts
             "sta $400E\n lda #$08\n sta $400F\n rts")              # noise: A = period
@@ -550,10 +601,20 @@ def tune_frames(rom, hdr, lens_all, adder=0):
         else: total += cur
     return total
 
-def patch_sound(rom):
+def patch_sound(rom, firebar=True):
     lo, hi = map(_cpu, SFX_CODE)
     assert hashlib.sha1(rom[lo:hi]).hexdigest() == SFX_CODE_SHA1, "sfx handler region is not the original"
     code, labels = build_sfx(SFX_CODE[0])
+    stop = SFX_CODE[0] + len(code); code += _hex(TUNE_END_CODE)
+    _expect(rom, TUNE_END[0], _hex(TUNE_END[1]))
+    rom[TUNE_END[0]:TUNE_END[0] + 9] = bytes([0x4C, stop & 0xFF, stop >> 8]) + b"\xEA" * 6      # jmp to the new code; the rest is never reached
+    if firebar:
+        copy = SFX_CODE[0] + len(code); fb = bytearray(_hex(FIREBAR[1]))
+        assert bytes(rom[_cpu(FIREBAR[0]):_cpu(FIREBAR[0]) + 16]) == bytes(fb[:16]) and bytes(rom[_cpu(FIREBAR[0]) + 17:_cpu(FIREBAR[0]) + 25]) == bytes(fb[17:]), "DrawFirebar is not the original"
+        fb[8], fb[16] = FIREBAR_TILE, FIREBAR_PALETTE
+        assert (copy + 0x13) >> 8 == (copy + 0x15) >> 8, "the branch of the copy would cross a page: one more cycle than the original"
+        code += bytes(fb)
+        _expect(rom, FIREBAR_CALL[0], _hex(FIREBAR_CALL[1])); rom[FIREBAR_CALL[0] + 1:FIREBAR_CALL[0] + 3] = bytes([copy & 0xFF, copy >> 8])
     assert len(code) <= hi - lo
     rom[lo:hi] = code + b"\xFF" * (hi - lo - len(code))
     for off, (old, targets) in SFX_CALLS.items():
@@ -608,14 +669,15 @@ def carve(t, idx, hitbox=True, marks=True):
     dx, dy, w, h = g
     for r in range(8):
         for c in range(8):
-            bx, by = dx + c, dy + r
+            bx, by = dx + c, dy + r                  # (r, c) is the pixel as it appears on screen
             if not (0 <= bx < w and 0 <= by < h): continue
             v = idx
             if marks:
                 if t in HOLLOW and 2 <= bx < w-2 and 2 <= by < h-2: v = 0
                 if t in SERRATED and by < 2 and (bx // 2) % 2: v = 0
                 if t in MARIO_TILES and t not in HOLLOW and w-4 <= bx < w-2 and 2 <= by < 4: v = 0
-            px[r][c] = v
+            if t in MIRRORED: px[7 - r][7 - c] = v
+            else: px[r][c] = v
     if marks and t in WINGS:
         for r in (6, 7): px[r] = [idx]*8
     return pack(px)
@@ -657,7 +719,7 @@ def build(rom: bytes, patch_pipes=True, patch_palette=True, hitbox=True, marks=T
         _expect(rom, PALETTE3_DATA, [0x0F, 0x07, 0x12, 0x0F]); rom[PALETTE3_DATA:PALETTE3_DATA+16] = bytes(BG_PAL[3]*4)
         _expect(rom, COLOR_ROTATE, [0x27, 0x27, 0x27, 0x17, 0x07, 0x17]); rom[COLOR_ROTATE:COLOR_ROTATE+6] = bytes([C['qblock']]*6)
     if sound:
-        patch_sound(rom)
+        patch_sound(rom, firebar=patch_pipes)
     return bytes(rom)
 
 def summary(orig: bytes, out: bytes) -> dict:
@@ -669,7 +731,7 @@ def summary(orig: bytes, out: bytes) -> dict:
             (PLAYER_COLORS, PLAYER_COLORS + 12), (BACKGROUND_COLORS, BACKGROUND_COLORS + 8), (PALETTE3_DATA, PALETTE3_DATA + 16), (COLOR_ROTATE, COLOR_ROTATE + 6)],
         "PRG: metatile graphics table": span(METATILE_PATCH) + [(CASTLE_METATILES, CASTLE_METATILES + 28)],
         "PRG: rope tile operands": span(ROPE_OPERANDS),
-        "PRG: sprite palette, tile and position tables and operands": span(SPRITE_PATCHES),
+        "PRG: sprite palette, tile and position tables and operands": span(SPRITE_PATCHES) + [(FIREBAR_CALL[0], FIREBAR_CALL[0] + 3)],
         "PRG: gameplay sites that queue a sound": [(o, o + 4) for o in (0x3510, 0x5DE3, 0x5F13, 0x52D1)],
         "PRG: sound engine": [(_cpu(0xF2D0), HDR + PRG), (0x10F7, 0x10FD)],
         "CHR: tiles": [(HDR + PRG, HDR + PRG + CHR)],
