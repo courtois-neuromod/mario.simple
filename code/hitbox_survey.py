@@ -16,7 +16,9 @@ tile's offset from the box corner and the box size, with horizontal/vertical
 flips folded back into CHR space.  The dominant geometry per tile is the
 HITBOX table of simplify_rom.py.  Objects whose state disables collisions
 (defeated enemies, d5 set; squished Goombas) and objects without a box are
-skipped.
+skipped.  A tile that an object draws at several offsets (the hammer, the
+Spiny egg) has no single geometry: check the result with audit_colours.py,
+which compares every drawn rectangle with its box on the simplified ROM.
 
 Usage: hitbox_survey.py ORIG_INTEGRATION_DIR REPLAY.bk2 [...]  > hitbox.txt
 Prints one line per tile: tile, owner, dx, dy, w, h, share of observations.
@@ -31,7 +33,7 @@ def live(name):
     """True if the owner's collision box is actually used by the game."""
     if name.startswith('ENEMY_'):
         eid, st = int(name[6:8], 16), int(name.split('_s')[1], 16)
-        return not (st & 0x20 or eid >= 0x2F or (eid == 0x06 and (st & 7) >= 2))
+        return not (st & 0x20 or (eid >= 0x2F and eid != 0x33) or (eid == 0x06 and (st & 7) >= 2))   # $33: the cannon-fired Bullet Bill has a box too
     if name.startswith('MISC_'): return int(name[6:], 16) >= 0x80       # hammers
     return name.startswith(('MARIO', 'POWERUP', 'FIREBALL'))
 
@@ -43,7 +45,7 @@ def main():
     for bk2 in replays:
         core = zipfile.ZipFile(bk2).read('Core.bin'); m = retro.Movie(bk2); m.step()
         env = retro.make(game, state=retro.State.NONE, inttype=retro.data.Integrations.CUSTOM_ONLY,
-                         use_restricted_actions=retro.Actions.ALL)
+                         use_restricted_actions=retro.Actions.ALL, render_mode="rgb_array")
         env.initial_state = core; env.reset(); f = 0
         while m.step():
             env.step([m.get_key(i, 0) for i in range(env.num_buttons)]); f += 1

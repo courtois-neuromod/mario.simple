@@ -150,8 +150,9 @@ The simplified game was designed under three constraints.
 \end{enumerate}
 
 \begin{table}[t]
-  \caption{Semantic colour legend of the simplified game. NES master-palette indices are given in
-  hexadecimal. Colours are configurable in the generator.}
+  \caption{Semantic colour legend of the simplified game. Blocks are coloured by what the player
+  can do with them: nothing (immutable), break them, hit or use them (interactive), collect them.
+  NES master-palette indices are given in hexadecimal. Colours are configurable in the generator.}
   \centering
   \small
   \begin{tabular}{llp{9.2cm}}
@@ -159,17 +160,18 @@ The simplified game was designed under three constraints.
     Category & Colour (NES) & Objects \\
     \midrule
     background & black (\hex{0F}) & everything non-interactive, in every area type, and the ``WORLD x-y'' screens \\
-    terrain & white (\hex{30}) & ground, stairs, hard blocks, pipes, tree-top and mushroom ledges, cloud terrain, cannons, bridges, used blocks, moving platforms, springboards, vines, bumped bricks \\
-    brick & grey (\hex{10}) & breakable bricks \\
-    ?-block & orange (\hex{27}) & question blocks, including the sprite of a bumped question block \\
-    coin & yellow (\hex{28}) & coins in the level, coins popping out of blocks, floating score numbers \\
+    immutable & white (\hex{30}) & ground, stairs, hard blocks, pipes, tree-top and mushroom ledges, cloud terrain, bridges, used blocks (also while they bounce after a hit), the pedestal and column of a cannon, the base of a springboard, moving platforms \\
+    breakable & grey (\hex{10}) & bricks (also while they bounce after a hit) \\
+    interactive & dark orange (\hex{17}) & question blocks, springboards, vines \\
+    collectible & light yellow (\hex{38}) & coins in the level, coins popping out of blocks, the coin icon of the status bar, floating score numbers \\
     item & green (\hex{2A}) & super mushroom \\
     1-up & dark green (\hex{1A}) & 1-up mushroom \\
     star & pale pink (\hex{35}) & starman \\
+    launcher & dark red (\hex{06}) & the barrel of a Bullet Bill cannon \\
     enemy & red (\hex{16}) & every enemy and enemy projectile (hammers, bullets) \\
-    player & light blue (\hex{21}) & Mario; flashes blue / green / orange under star power \\
+    player & light blue (\hex{21}) & Mario; flashes blue / green / grey under star power \\
     fire player & deep blue (\hex{12}) & Mario after a fire flower, his fireballs, and the fire flower itself \\
-    goal & purple (\hex{24}) & flagpole, ball, flag, axe, flagpole score \\
+    goal & purple (\hex{24}) & flagpole, ball, flag, flagpole score \\
     \bottomrule
   \end{tabular}
   \label{tab:legend}
@@ -218,22 +220,31 @@ it.
 
 \textit{Super Mario Bros.} composes the background from metatiles, each defined by four tile
 identifiers listed in four tables in PRG-ROM (one table per background palette, 101 metatiles in
-total; CPU addresses \hex{8B10}--\hex{8CC0} in the annotated disassembly\cite{smbdis}). We dumped
+total; CPU addresses \hex{8B10}--\hex{8CA3} in the annotated disassembly\cite{smbdis}). We dumped
 these tables from the original ROM and used them to assign every background tile to the block
 type(s) it belongs to (ground, brick, question block, pipe, cloud, bush, hill, \ldots), rather
 than guessing from its picture. Each tile was then rewritten as either transparent (all pixels
 index~0) for decoration, or a solid square of a chosen palette index (1, 2 or 3) for interactive
 blocks; the index selects the semantic colour through the palettes of Section~\ref{sec:palettes}.
-The flagpole shaft keeps its thin shape but is recoloured, and text and HUD tiles are untouched.
+The flagpole shaft keeps its thin shape but is recoloured, and so is the coin icon of the status
+bar, which takes the coin colour; text and the other HUD tiles are untouched. A Bullet Bill cannon
+is made of three metatiles (the barrel, from which the bullets come out, a pedestal and a column)
+that use the palette of the ground and the bricks, whose third colour is free: the barrel has a
+colour of its own (launcher), the pedestal and the column are terrain.
 Figure~\ref{fig:tilesheet} shows the complete tile sheet before and after.
 
-Two tiles are shared between categories and could not be both transparent and solid. Tile
-\hex{26} is both the fill of the decorative hills and the inner column of every pipe shaft; tile
-\hex{47} is both the breakable brick and the wall of the end-of-level castle. We therefore also
-edited the metatile-graphics table: the two pipe-shaft metatiles use the pipe-edge tile instead of
-\hex{26} (4 bytes), and the seven castle metatiles use the blank tile (28 bytes), which makes the
-castle, a purely decorative object, disappear. This table is read only when the game writes a new
-screen column into the PPU write buffer.
+Some tiles are shared between categories, so that no tile rewrite can serve both; for those we
+edited the metatile-graphics table instead (42 bytes). Tile \hex{26} is both the fill of the
+decorative hills and the inner column of every pipe shaft: the two pipe-shaft metatiles use the
+pipe-edge tile instead (4 bytes). Tile \hex{47} is the breakable brick, the wall of the
+end-of-level castle and the base of the springboard: the seven castle metatiles use the blank tile
+(28 bytes), which makes the castle, a purely decorative object, disappear, and the two half-block
+metatiles under a springboard, which are solid and cannot be broken, use a terrain tile (4 bytes).
+Tiles \hex{A2}/\hex{A3} are the flagpole shaft and the vertical rope of the balance lifts, which is
+decoration: the rope and pulley metatiles use the blank tile (6 bytes). This table is read only
+when the game writes a new screen column into the PPU write buffer. The rope is the one piece of
+background that the game also draws without a metatile: while a balance lift moves down, a routine
+queues the two rope tiles above it directly; its four immediate operands now name the blank tile.
 
 \subsection{Sprite tiles}
 \label{sec:sprites}
@@ -257,23 +268,42 @@ are therefore separated by \emph{index} within a palette (enemies index~2, items
 platforms index~3), and the palettes of Section~\ref{sec:palettes} give each index its colour.
 The player's tiles use index~1 because the star-power effect rotates the player's palette
 \emph{attribute} through the four sprite palettes: with index~1 he flashes light blue, dark
-green, green and orange rather than enemy red.
+green, green and grey rather than enemy red.
 
 Four palettes with three indices each give twelve sprite colours, but the game's own palette
 assignments crowd some categories into the same palette (coins popping out of blocks, fireballs,
 the mushroom and the Spiny all use sprite palette~2). Where that prevented a category from having
-its own colour, we changed the palette the game assigns to the object; each change is a single
-immediate operand or table byte in that object's drawing routine (Table~\ref{tab:changes}). The
-fireball now uses the player's palette (index~3), coins popping out of blocks use palette~3
-(index~3), the bumped brick uses palette~2 (index~3, terrain colour, as no sprite palette has a
-slot left for the brick grey), the bumped question block always uses palette~3 (the original used
-palette~1 outside ground areas), the vine uses palette~2 (index~3, terrain: it is a climbable
-solid), and floating score numbers use palette~3 (index~3, coin colour). The fire flower and the
-star use the player's palette (index~3, the fire-player deep blue, and index~2, pale pink), and the routine
-that cycles their top row through the four palettes every two frames now always selects
-palette~0. The 1-up and the super mushroom share their tiles and are told apart by the game with
-the palette alone (1 versus 2), so index~1 of palette~1 is a dedicated 1-up colour. Brick debris
-sprites are transparent.
+its own colour, we changed the palette the game assigns to the object (Table~\ref{tab:changes}).
+The game chooses a sprite's palette in three ways, all of them presentation data that reaches
+nothing but the sprite list. (i)~An immediate operand of the object's drawing routine: the
+fireball now uses the player's palette (index~3); the coin popping out of a block (two sprites)
+and the ``200'' that follows it use palette~3 (index~3), as do the floating score numbers (coin
+colour); the vine uses palette~3 (index~2, interactive); the fire flower and the star use the
+player's palette (index~3, the fire-player deep blue, and index~2, pale pink), and the routine that
+cycles their top row through the four palettes every two frames now always selects palette~0.
+(ii)~The enemy attribute table, one byte per enemy graphic, which the enemy drawing routine ORs
+into the sprite attribute: Buzzy Beetle, Goomba, Bloober and Bullet Bill leave palette~3 for
+palette~2 (both hold the enemy colour at index~2), which frees index~2 of palette~3 for the
+interactive colour, and the three springboard frames enter palette~3. Two special cases of that
+routine bypass the table and needed their own operand changed: the cannon-fired Bullet Bill and the
+two lower rows of the springboard. (iii)~Small per-object tables: the power-up attribute table
+(the 1-up and the super mushroom share their tiles and are told apart by the game with the palette
+alone, 1 versus 2, so index~1 of palette~1 is a dedicated 1-up colour) and the hammer attribute
+table. One object could not be given its colour in any of these ways: the fire bars of the castle
+levels are drawn by the routine that draws the player's fireballs, with the same tiles and the
+same operand. That routine is 25 bytes long and contains no jump; the generator places a copy of
+it, with a tile of the enemy category and sprite palette~2, in the space freed by the sound-effect
+handlers (Section~\ref{sec:sound}), and the one call of the fire-bar code goes to the copy, which
+executes the same instructions in the same time.
+
+A block that is hit from below is drawn as a sprite while it bounces, by one routine: it draws the
+brick tiles and, if the block is turning into a used block (a question block, a brick that held an
+item, a hidden block), redraws it with the used-block tile. The bouncing block is thus already
+what it becomes, and is coloured accordingly: the used block uses palette~2 (index~3, terrain),
+the brick keeps the game's own palette~3, whose index~1 is the brick colour. Brick debris,
+fireworks, the castle flag and the air bubbles of the underwater areas are transparent. Sprite~0,
+two rows of pixels that complete the coin icon of the status bar and that the game uses to time the
+screen split below the status bar, keeps its shape and takes the coin colour.
 
 \subsection{Sprite rectangles fit the collision box}
 \label{sec:hitbox}
@@ -297,12 +327,29 @@ the sprite's horizontal and vertical flip bits folded back into tile space (the 
 right-hand copy of symmetric tiles with the flip bit, so a tile used on both sides of an object is
 consistent once flips are folded). Objects whose state disables collisions (defeated enemies
 falling off screen, squished Goombas) and the frames of the grow and shrink animations were
-excluded. The dominant geometry per tile is a 182-entry table in the generator; the tiles that
-never occur in the dataset (swimming player, Bloober) were placed from the graphics tables, and
-castle objects (Bowser, Podoboo, flames, fire bars) were left as full squares. Table~\ref{tab:boxes}
+excluded. The dominant geometry per tile is a 187-entry table in the generator; the tiles of the
+big swimming player, who never occurs in the dataset, were placed from the graphics tables, and
+castle objects (Bowser, Podoboo, flames, fire bars) were left as full squares. Every drawn
+rectangle was then compared with its box on the simplified ROM (Section~\ref{sec:verification}),
+which corrected the entries of the Bloober, the hammer, the Bullet Bill and the Spiny egg. Table~\ref{tab:boxes}
 gives the resulting box sizes next to the size of the drawn sprite. For every object of its first
 four rows the box lies inside the drawn sprite, so the carve is exact; the exceptions are listed
-in Section~\ref{sec:verification}. We used the exclusive convention (a box of width
+in Section~\ref{sec:verification}. Three objects needed more than a tile rewrite to be drawn on
+their box. The hammer is a pair of sprites that spins around an $8\times8$ box located at the
+object's position: in every frame half of one sprite lies in the box and the other sprite lies
+outside it, and each tile takes both roles in turn, so no carving fits; the seven 4-byte tables
+that give, per animation frame, the offsets, tiles and attributes of the two sprites now put one
+full tile on the box and make the other sprite blank. The Spiny egg (the Spiny while it falls from
+Lakitu) is made of four quadrants, of which the game draws the two right-hand ones mirrored both
+ways; the original graphics table used two tiles, each once on the left and once on the right at
+the other height, so no carving fits either, and the table now names one tile per quadrant. The
+Bullet Bill exists in two variants that share their tiles and their box: the one fired by a
+cannon, which a special case of the enemy routine draws one pixel above its position by
+decrementing the zero-page byte that holds the row being drawn (\hex{0002}), and the one that
+flies in from off screen in two levels, drawn at its position. The decrement now applies to a
+byte that the same special case overwrites four instructions later (same size, same timing), so
+both variants are drawn at their position; the only side effect is that \hex{0002} is left one
+higher than on the original ROM (Section~\ref{sec:verification}). We used the exclusive convention (a box of width
 $\mathit{right}-\mathit{left}$), which yields the familiar sizes; because the game compares edges
 inclusively, two boxes also register a collision when they merely touch, i.e.\ the effective box
 is one pixel larger on each side than drawn. The player's collisions with the \emph{terrain} are
@@ -352,7 +399,7 @@ $8\times2$ bar 1~px above the box; it is the only opaque pixel drawn outside a c
 it is on one side of the enemy only because the other tile of that row is the Koopa head shared
 with the walking Koopa. The squished Goomba, which has no collision, is a $16\times4$ bar on the
 ground, and the springboard, which the game handles by position rather than by a sprite box, is
-striped.
+striped, in the interactive colour.
 
 \begin{table}[t]
   \caption{Shape cues of the simplified game.}
@@ -406,24 +453,25 @@ striped.
     moving vs.\ resting shell & motion & kept \\
     squished Goomba (harmless) & flat drawing & added: flat bar \\
     killed by fireball, shell or star & drawn upside down, falls & kept: rectangle mirrored in the sprite frame, falls \\
-    hammers, bullets & drawing & kept: red \\
+    hammers, bullets & drawing & kept: red, exactly the box (the hammer no longer spins) \\
     Piranha inside its pipe & hidden behind pipe & kept (priority bit) \\
     enemy facing direction; Lakitu's cloud & drawing & lost (motion); removed (decoration) \\
     \midrule
     \multicolumn{3}{l}{\textit{Items and blocks}} \\
     super mushroom vs.\ 1-up & palette & added: green vs.\ dark green \\
     fire flower; star & drawing, flashing & added: deep blue; pale pink (flashing removed) \\
-    coins & drawing & kept: yellow \\
-    ?-block vs.\ used block; brick vs.\ hard block & drawing & kept: orange (flashing) vs.\ white; grey vs.\ white \\
+    coins & drawing & kept: light yellow \\
+    ?-block vs.\ used block; brick vs.\ hard block & drawing & kept: dark orange vs.\ white; grey vs.\ white (no pulsing) \\
+    block that has just been hit & bounces, drawn as what it becomes & kept: white (used block) or grey (brick) \\
     content of blocks, hidden blocks, enterable pipes & invisible in the original & same as original \\
-    vine (climbable); springboard & drawing & added: terrain white; stripes \\
-    lifts & drawing, motion & kept: white bars, motion \\
-    Bullet Bill cannon & drawing & lost as a danger source: solid terrain, drawn as such \\
-    flagpole, flag, axe; castle & drawing & kept: purple; removed (decoration) \\
+    vine (climbable); springboard & drawing & added: interactive dark orange; the springboard is striped, its solid base white \\
+    lifts; rope of the balance lifts & drawing, motion & kept: white bars, motion; the rope is removed (decoration) \\
+    Bullet Bill cannon & drawing & added: dark red barrel (launcher) on a white pedestal and column \\
+    flagpole, flag; castle & drawing & kept: purple; removed (decoration) \\
     area theme & palettes, decoration & removed by design \\
     \midrule
     \multicolumn{3}{l}{\textit{Events and HUD}} \\
-    points earned & floating numbers & kept, in coin yellow (flagpole score in purple) \\
+    points earned & floating numbers & kept, in the coin colour (flagpole score in purple) \\
     coin collected, block bumped & sprite animations & kept \\
     brick shattered; level completed & debris; fireworks, castle flag & lost: decoration, transparent \\
     score, coins, world, time, lives & HUD text & kept \\
@@ -445,19 +493,27 @@ natural brown so that it sits far from enemy red, two adjacent NES hues of simil
 and the player is blue. The fire-player colour (\hex{12}, a deep blue) was chosen next to the
 player's light blue so that the change of state is visible while keeping the object in the
 ``player'' family; fireballs and the fire flower share it. HUD text shares the terrain white.
+Two choices are a compromise. The interactive dark orange (\hex{17}) is the NES hue next to the
+enemy red, at the same brightness; the two never share a shape (question blocks are static
+$16\times16$ squares, enemies smaller moving rectangles), and an earlier version that used the
+lighter orange \hex{27} next to a coin yellow \hex{28} made question blocks read as coins. The
+launcher dark red (\hex{06}) is in the enemy family on purpose: a barrel is where enemies come
+from. Question blocks and coins do not pulse as in the original: the tables that the game rotates
+into background palette~3 hold a single colour.
 
 \begin{table}[t]
   \caption{Meaning of each palette index after the modification. BG: background palettes; SPR:
-  sprite palettes. Index 0 is the backdrop (background) or transparent (sprites).}
+  sprite palettes. Index 0 is the backdrop (background) or transparent (sprites); the entries in
+  parentheses are not used by any tile.}
   \centering
   \small
   \begin{tabular}{lcccccccc}
     \toprule
     index & BG0 & BG1 & BG2 & BG3 & SPR0 & SPR1 & SPR2 & SPR3 \\
     \midrule
-    1 & item & brick & text (white) & ?-block & player & 1-up & item & ?-block \\
-    2 & terrain & terrain & terrain & terrain & star & enemy & enemy & enemy \\
-    3 & goal & goal & goal & coin & fire player & goal & terrain & coin \\
+    1 & (item) & brick & text (white) & interactive & player & 1-up & item & brick \\
+    2 & terrain & terrain & terrain & terrain & star & enemy & enemy & interactive \\
+    3 & goal & launcher & (goal) & coin & fire player & goal & terrain & coin \\
     \bottomrule
   \end{tabular}
   \label{tab:palettes}
@@ -475,7 +531,7 @@ Everything else the engine touches is its own state and the APU registers, which
 read. The audio was therefore simplified under the same three constraints as the image. The six
 area tunes are replaced by silence through the table from which the game selects them; the
 star-power tune becomes a low continuous hum; the tunes the game waits for (death, level clear,
-castle clear, victory, game over, time warning) are rewritten as data for the unchanged music
+castle clear, victory, game over, time warning) are rewritten as data for the music
 handler, as one to three plain tones followed by rests with exactly the frame count of the original
 tune, parsed from the original data and asserted at build time. The three per-channel sound-effect
 handlers of the original (about 730 bytes, one hand-written envelope or sweep per effect) are
@@ -487,7 +543,14 @@ power-up collected, extra life, Bullet Bill fired, brick shattered and Bowser's 
 Three effects share a queue bit with an unrelated event in the original (pipe entry with injury,
 fireworks with the Bullet Bill blast, the swim stroke with the stomp); at the four gameplay sites
 concerned the operand naming the bit is changed so that the decorative events land on unused bits
-mapped to silence, and each site overwrites the register right after the store. The sound engine's
+mapped to silence, and each site overwrites the register right after the store. A cue writes the
+registers of its channel once, where the original effects rewrite them on every frame, so whatever
+the music handler writes to the same channel afterwards silences the cue. The handler is unchanged
+except in the three places where that happened: on a silent drum beat (the only kind left, in the
+star-power tune) it no longer writes the noise channel; when a tune is over it silences only the
+square channels on which no effect is playing; and when the death tune starts it clears the
+pending effect of the second square channel instead of only stopping it, without which the tune's
+single tone was skipped. The sound engine's
 RAM thus differs from the original ROM during play and is masked by the verification of
 Section~\ref{sec:verification}; every other byte, i.e.\ everything game logic computes, must still
 match. Savestates captured mid-level carry the tune that was playing; the companion tool that
@@ -497,10 +560,14 @@ rewrites their palette also sets the engine idle.
 \label{sec:changes}
 
 Table~\ref{tab:changes} summarises the bytes that differ between the original and the simplified
-cartridge image. No byte of level data is changed. On the graphics side the 199 modified PRG-ROM
-bytes are all data that the game copies into the PPU write buffer or the sprite list; the sound
-change rewrites the sound-effect handler and the tune data of the sound engine and six operands at
-the gameplay sites that queue a sound (Section~\ref{sec:sound}).
+cartridge image. No byte of level data is changed. On the graphics side the 226 modified PRG-ROM
+bytes are all data that the game copies into the PPU write buffer or the sprite list, with three
+exceptions in the drawing routines: two instructions are replaced by one of the same size and
+timing (a shift of a palette number by a no-operation, and the decrement that raised the
+cannon-fired Bullet Bill by a decrement of a dead byte), and the fire-bar code calls a copy of its
+drawing routine. The sound change rewrites the sound-effect handler and the tune data of the sound
+engine, three places of its music handler and six operands at the gameplay sites that queue a
+sound (Section~\ref{sec:sound}).
 
 \begin{table}[t]
   \caption{Bytes changed in the cartridge image (40{,}976 bytes: 16-byte iNES header, 32~KB
@@ -514,12 +581,13 @@ the gameplay sites that queue a sound (Section~\ref{sec:sound}).
     iNES header & 0 & -- \\
     PRG-ROM: level data & 0 & -- \\
     PRG-ROM: game logic & 6 & operands at the four sites that queue the swim, pipe-entry and fireworks sounds \\
-    PRG-ROM: sound engine & 966 & sound-effect handler region (731, of which 267 bytes of new code and tables), its call sites (12), tune headers (95) and data (84), envelope tables (32) and constants (5), area-tune selection table (6) \\
-    PRG-ROM: palette tables & 156 & four area palette sets, snow and mushroom variants, Bowser palette, player palette rows, backdrop table, question-block/coin animation tables \\
-    PRG-ROM: metatile graphics table & 32 & pipe shafts (4) and castle (28) \\
-    PRG-ROM: object graphics tables & 4 & power-up attribute table (2), Bloober frame 2 top row (2) \\
-    PRG-ROM: sprite-palette operands & 7 & fireball, block coin, bumped brick, bumped ?-block, vine, score numbers, flower/star palette cycling \\
-    CHR-ROM: tile shapes & 5{,}528 & 244 sprite tiles and 97 background tiles rewritten \\
+    PRG-ROM: sound engine & 976 & sound-effect handler region (731, of which 267 bytes of new code and tables, 17 bytes of tune-end code and the 25-byte copy of the fire-bar routine), its call sites (12), the music handler (11), tune headers (95) and data (84), envelope tables (32) and constants (5), area-tune selection table (6) \\
+    PRG-ROM: palette tables & 136 & four area palette sets, snow and mushroom variants, Bowser palette, player palette rows, backdrop table, question-block/coin animation tables \\
+    PRG-ROM: metatile graphics table & 42 & pipe shafts (4), castle (28), lift ropes and pulleys (6), springboard base (4) \\
+    PRG-ROM: background tile operands & 4 & the rope tiles queued while a balance lift moves \\
+    PRG-ROM: object tables & 30 & enemy attribute table (7), power-up attribute table (2), Bloober frame 2 top row (2), Spiny egg quadrants (4), the seven hammer tables (15) \\
+    PRG-ROM: drawing-routine operands & 14 & fireball, block coin (2) and its score, bumped used block (2), vine, score numbers, cannon-fired Bullet Bill (2), springboard, flower/star palette cycling, fire-bar call (2) \\
+    CHR-ROM: tile shapes & 5{,}511 & 255 sprite tiles and 152 background tiles rewritten \\
     \bottomrule
   \end{tabular}
   \label{tab:changes}
@@ -532,60 +600,94 @@ The simplified cartridge is generated deterministically from the original by a s
 (\texttt{code/simplify\_rom.py}) that contains the tile classification, the colour table and the
 list of PRG patches; every PRG patch asserts the original bytes before writing. The input is the
 original ROM of the \textit{mario} stimulus set (MD5 \texttt{811b027e\ldots}); the output has MD5
-\texttt{e0d177c4\ldots} (\texttt{626c6792\ldots} with the original sound). Companion tools reproduce the sprite survey
+\texttt{2158c12f\ldots} (\texttt{ac525183\ldots} with the original sound). Companion tools reproduce the sprite survey
 (\texttt{survey\_sprite\_tiles.py}), the collision-box survey (\texttt{hitbox\_survey.py}), the
-verification of Section~\ref{sec:verification} (\texttt{verify\_replays.py}) and the palette and
-sound-state rewrite of savestates (\texttt{fix\_state.py}). The stimulus is distributed as a drop-in replacement of the
+three checks of Section~\ref{sec:verification} (\texttt{verify\_replays.py},
+\texttt{audit\_colours.py}, \texttt{audit\_sound.py}), the rewrite of the palette, sound state and
+drawn screen of savestates (\texttt{fix\_state.py}) and the figures (\texttt{make\_figures.py}). The stimulus is distributed as a drop-in replacement of the
 \textit{mario} stimulus set: same savestates, scenario and RAM-variable map, different
 \texttt{rom.nes}.
 
-\subsection{Verification of logical identity}
+\subsection{Verification}
 \label{sec:verification}
 
-We tested the claim of Section~\ref{sec:nes} directly. For a participant recording, the
-controller input is replayed on the original and on the simplified ROM with the same emulator,
-starting from the recording's own initial savestate, and the complete emulator RAM is compared
-after every frame. Differences are only tolerated in three regions that the graphics path writes
-and game logic never reads: the sprite list (\hex{0200}--\hex{02FF}), the PPU write buffer
-(\hex{0300}--\hex{03FF}) and one zero-page scratch byte (\hex{0004}) in which the block-drawing
-routine hands its palette to a shared helper, and, since the sound change, in the sound engine's
-own state (\hex{00F0}--\hex{00FF}, \hex{07B0}--\hex{07CA}), of which game logic reads back only
-\texttt{EventMusicBuffer} to wait for tunes whose length is preserved. A savestate is also taken halfway through the run on
-the original ROM, loaded into the simplified ROM, and the remaining input is replayed to check
-that the run continues identically. The same procedure applied to a graphics-only build (tile
-changes without any PRG patch) must yield byte-identical RAM on every frame, which tests the
+Three tools replay recordings with the same emulator and check, respectively, that the game logic
+is untouched, that the picture is what the legend says, and that the sound is.
+
+\paragraph{Game logic.} We tested the claim of Section~\ref{sec:nes} directly. A participant
+recording is replayed on the original and on the simplified ROM, starting from the recording's own
+initial savestate, and the 2~KB of console RAM are compared after every frame. The comparison is
+made on the frames where the CPU is parked in the game's idle loop, i.e.\ where all the logic of
+the frame has run; on the few frames where it has not (the game takes more than one frame to wipe
+its memory when an area loads), the two ROMs can be a few CPU cycles apart because their sound
+code differs, and those frames are skipped and counted. Differences are tolerated only in the
+bytes that describe what is drawn or played: the tile and attribute bytes of the sprite list
+(\hex{0200}--\hex{02FF}), and its position bytes only for sprites that neither ROM draws (off
+screen, or the blank tile) and for the two objects that are placed differently on purpose, the
+hammer and the cannon-fired Bullet Bill (Section~\ref{sec:hitbox}), so that every other sprite is
+checked to be drawn where the original draws it; one position byte, \hex{0207}, the horizontal
+position of the player's first sprite, is read by game logic (the fire bars of the castle levels
+test a hit against it) and must be equal in all cases; the two PPU
+write buffers (\hex{0301}--\hex{033F}, \hex{0341}--\hex{0362}), whose length bytes must be equal;
+the addresses above the second buffer (\hex{0363}--\hex{03FF}) only where it reaches while an area
+loads, since during play they hold game variables; two zero-page scratch bytes through which the
+drawing routines pass a sprite's palette (\hex{0004}) and the row being drawn (\hex{0002}, tolerated
+only as one more than on the original ROM, on a frame where a cannon-fired Bullet Bill exists or
+has just existed); the sound engine's own state
+(\hex{00F0}--\hex{00FF}, \hex{07B0}--\hex{07CA}), of which game logic reads back only
+\texttt{EventMusicBuffer} to wait for tunes whose length is preserved; and the CPU stack
+(\hex{0160}--\hex{01FF}), which is empty in the idle loop. A savestate is also taken halfway
+through the run on the original ROM, loaded into the simplified ROM, and the remaining input is
+replayed to check that the run continues identically. The same procedure applied to a build with
+the original sound must yield identical sound state and stack as well, and to a graphics-only
+build (tile changes without any PRG patch) byte-identical RAM on every frame, which tests the
 emulator side of the argument.
 
-The verification set is seven recordings (levels 1-1 with fire Mario, star power and a completed
-level; 1-2; 1-3; 3-1; 4-2; 5-1; 8-2; 1{,}900--6{,}000 frames each) plus the 26 loadable level
-savestates of the stimulus set played for 600 frames with scripted input (run right, jump
-periodically). The sound change was verified on eight further recordings of a test participant
-(levels 1-1 and 3-1, 650--4{,}250 frames, including four deaths and two completed levels): no byte
-outside the tolerated regions differs on any frame, the mid-run savestate tracks, and
-\texttt{EventMusicBuffer} returns to zero on the same frames after each death and after the flag.
-The star-power hum and the time-warning tune were exercised by queueing them in RAM mid-level on
-both ROMs, with the same result. \TODO{consider running the full dataset (3{,}374 recordings) and
-reporting the count.}
+\paragraph{Picture.} RAM identity says nothing about the picture. A second tool replays recordings
+on the simplified ROM and checks the picture object by object, using the game's own memory to know
+what each thing on screen is: every sprite of the sprite list is attributed to the object that
+drew it through the game's sprite-offset tables, and the colours of its opaque pixels must be those
+of that object's category; every visible $16\times16$ cell of the name table must be drawn in the
+category colour of the block that the game holds at that place in its block buffer, and be empty
+where it holds none; the rectangle drawn for each object that has a live collision box is compared
+with that box, edge by edge; and every pixel of the rendered frame must have a legend colour. Its
+expectations are written from the game's logic, independently of the tile tables of the generator.
 
-Two properties of the recordings matter for rendering them on the simplified ROM. First, a
-recording's initial savestate carries the PPU palette of the moment it was captured, i.e.\ the
-original colours, and the game rewrites palettes only when an area loads. 3{,}231 of the 3{,}374
-recordings start on the ``WORLD x-y'' screen, so the level palette is written about 120 frames
-later, but that first screen is drawn with the stored palette (original player colours) whereas
-later intermissions are drawn by the simplified ROM (blue player); 143
-recordings (79 of them the first repetition of a run) start in gameplay and would keep the original
-colours until the next area change. A companion tool rewrites the 32 palette bytes inside the
-initial state; the run is RAM-identical afterwards, and the level savestates of the stimulus set
-are distributed rewritten. Second, where a collision box sticks out of
+\paragraph{Sound.} The emulator's savestate holds the registers of the sound chip, so what each
+channel does on a frame can be read exactly. A third tool checks that every sound effect sets its
+channel to the pitch, duty and volume of its cue, keeps sounding with those values on every frame
+and lasts its number of frames, that a channel is audible only while an effect or a tune plays on
+it, that each tune sounds only its notes, and that each event tune that starts sounds them in
+full unless an effect takes its channel.
+
+\paragraph{Savestates.} Three properties of the recordings matter for rendering them on the
+simplified ROM: a recording's initial savestate carries the PPU palette, the state of the sound
+engine and the name tables (the tiles of the screen already drawn) of the moment it was captured,
+i.e.\ what the original ROM had produced. 3{,}231 of the 3{,}374 recordings start on the
+``WORLD x-y'' screen, so the level is drawn and its palette written about 120 frames later by
+the simplified ROM, but that first screen is drawn with the stored palette (original player
+colours). The other 143, all of level 4-1, whose level state was saved in gameplay, would keep the
+original colours until the next area change, go on playing the original tune until the end of its
+section, and show the castle next to which that level starts, drawn by the original ROM, as a wall
+in the brick colour. A companion tool rewrites the 32 palette bytes, sets the sound engine idle
+and redraws the cells of the name tables that the simplified ROM draws differently (it reads what
+each cell is from the game's block buffer in the same state); the run is RAM-identical afterwards,
+and the level savestates of the stimulus set are distributed rewritten.
+
+\paragraph{Residual differences between rectangle and box.} Where a collision box sticks out of
 the drawn sprite, the missing pixels are not drawn, because that would require additional sprite
 entries: Hammer Bro's box extends 4~px below his feet, lifts have a 5-px landing-tolerance zone
-under the bar, a hammer's $8\times8$ box is offset 4~px from its tile so half of it is undrawable,
-a resting shell has a 1-px strip of box above it, and Bowser has a box on his front half only.
-Smaller residuals: the cannon-fired Bullet Bill is drawn 1~px higher than the frenzy variant
-relative to its box; the Spiny egg alternates two frames drawn 2~px apart; Lakitu's box control
-byte switches to the $4\times4$ flame entry in about 12\% of his frames; and in about 3\% of frames
-the box lags the sprite by 1~px because the game computes it before the final position update of
-the frame.
+under the bar, a resting shell has a 1-px strip of box above it, and Bowser has a box on his front
+half only. Smaller residuals: a Lakitu that the game re-creates after one was defeated has the
+$4\times4$ box of Bowser's flame, whose set-up routine it shares, and is still drawn
+$12\times12$; a Koopa shell that a block bumped from below has turned over is drawn 4~px below
+its box, because the game draws it from the same two tiles as a stomped shell, placed 3~px lower
+relative to the box, and the tiles are fitted to the stomped shell; a hammer in flight occupies
+two of the sprite slots of an enemy or power-up that is on screen with it, which is then drawn
+with one of its rows missing, as in the original game; and the box can lag the rectangle by 1 to
+3~px because the game computes it before the final position update of the frame. The fire bars of the castle levels have no box: the game
+compares the position of each of their segments with that of the player's sprite, and they are
+drawn as the $8\times8$ sprites they are.
 
 \subsection{Characterisation of the visual change}
 \label{sec:imagestats}
@@ -633,9 +735,11 @@ or two sentences describing what a naive observer sees.}
 \begin{figure}[t]
   \centering
   \includegraphics[width=\textwidth]{original_vs_simplified.png}
-  \caption{Matched frames of the original (top) and simplified (bottom) game: three frames of a
-  participant recording in level 1-1, and scripted play in the underground level 1-2 and the night
-  level 3-1. \TODO{replace by a curated selection and add panel labels; consider adding the
+  \caption{Matched frames of the original (top) and simplified (bottom) game, from participant
+  recordings: question blocks, bricks and a stomped Goomba (1-1); a question block just hit, which
+  bounces as the used block it has become while a coin pops out (1-1); coins, bricks and Koopas
+  underground (1-2); a springboard and the fire player at night (3-1); cannons, whose barrel is the
+  launcher, and their Bullet Bills (7-1). \TODO{add panel labels; consider adding the
   \textit{mariostars} rendering of the same frames as a third row.}}
   \label{fig:compare}
 \end{figure}
@@ -643,20 +747,22 @@ or two sentences describing what a naive observer sees.}
 \begin{figure}[t]
   \centering
   \includegraphics[width=0.9\textwidth]{hitbox_original_vs_simplified.png}
-  \caption{Collision boxes. Left: frames of a participant recording in level 1-1 on the original
-  game, with the collision boxes read from RAM (\hex{04AC}--\hex{04DB}) at the same frame drawn in
-  magenta (boxes of inactive object slots are stale and also drawn). Right: the simplified rendering
-  of the same frames; every moving object is exactly its box. \TODO{crop, label panels.}}
+  \caption{Collision boxes. Left: frames of participant recordings on the original game, with the
+  collision boxes that the game is using, read from RAM (\hex{04AC}--\hex{04DB}) at the same frame,
+  drawn in magenta. Right: the simplified rendering of the same frames; every moving object is drawn
+  as its box (the exceptions are listed in Section~\ref{sec:verification}). \TODO{label panels.}}
   \label{fig:hitbox}
 \end{figure}
 
 \begin{figure}[t]
   \centering
   \includegraphics[width=0.9\textwidth]{cues_original_vs_simplified.png}
-  \caption{Colour and shape cues, original (left of each pair) and simplified (right): the toothed
-  Piranha Plant, the Paratroopa's wing bar, the hollow dying player and shell, the Goomba's
-  $10\times6$ box and the player's facing hole, and the four power-ups in their own colours, plus the
-  striped springboard. \TODO{tighter crops, panel labels.}}
+  \caption{Colour and shape cues, original (left of each pair) and simplified (right). Blocks by
+  what the player can do with them: interactive question blocks among breakable bricks, a block just
+  hit, collectible coins, a cannon and its launcher barrel, a springboard. Objects: Hammer Bro and
+  hammer, the toothed Piranha Plant, the Paratroopa's wing bar, the hollow shell and dying player,
+  the Goomba's $10\times6$ box and the player's facing hole, Lakitu and a Spiny egg, the four
+  power-ups in their own colours, a lift, and the flagpole. \TODO{panel labels.}}
   \label{fig:cues}
 \end{figure}
 
@@ -678,20 +784,48 @@ or two sentences describing what a naive observer sees.}
   \label{fig:levels}
 \end{figure}
 
-\subsection{Logical identity}
+\subsection{Verification}
 
-\TODO{turn into a table.} On the seven recordings tested, the graphics-only build produced
-byte-identical RAM on every frame. With the palette, metatile, graphics-table and sprite-palette
-patches, the only RAM bytes that ever differed lay in the three presentation regions listed in
-Section~\ref{sec:verification} (\hex{0004}, \hex{0200}--\hex{02FF} and \hex{0304}--\hex{03B0}),
-on the frames where a screen column, a palette or an affected sprite was queued; no byte outside
-these regions differed on any frame (in particular the collision boxes at \hex{04AC}--\hex{04DB}
-were identical), savestates taken on either ROM loaded on the other and tracked the original run
-to its end, and the 26 level savestates played with scripted input gave identical RAM outside the
-same three regions. Consequently every RAM-derived variable of the stimulus set
+\TODO{turn into a table.} On the 3{,}374 recordings of the \textit{mario} dataset
+(18{,}132{,}655 frames), replayed on the original and on the simplified ROM, no byte of console RAM
+outside the presentation regions of Section~\ref{sec:verification} differed on any of the
+18{,}123{,}537 frames compared; in particular the collision boxes at \hex{04AC}--\hex{04DB} were
+identical, and every sprite was drawn at the position where the original ROM draws it, except
+those of the hammer and of the cannon-fired Bullet Bill. 12{,}492 frames
+(0.069\,\%) were not in the idle loop and were skipped. The mid-run savestate check,
+made for one recording in eight, tracked the original run to its end in all 422. The
+bytes that did differ were the sound engine's state and the PPU write buffers (every recording),
+the sprite list (3269 recordings), the scratch bytes \hex{0004} (724) and
+\hex{0002} (724, the recordings in which a cannon fires), and one byte of the stack page,
+\hex{01F7} (1880; in 4 of them \hex{01F5} as well), where the original
+sound-effect routines leave half of a return address when they call a helper that the
+replacement routine jumps to instead. A build with the original sound code gave identical sound
+state and stack as well (44 recordings), and the 26 level savestates played with scripted input
+gave identical RAM on both ROMs. Consequently every RAM-derived variable of the stimulus set
 (positions, score, coins, lives, enemy and power-up states) is identical between versions for a
-given input sequence, and the 3{,}374 recordings of the \textit{mario} dataset can be rendered in
-either version without conversion. \TODO{confirm the recording count from the dataset paper.}
+given input sequence, and the recordings of the \textit{mario} dataset can be rendered in either
+version without conversion. \TODO{confirm the recording count from the dataset paper.}
+
+The picture audit of the same recordings (every second frame) found 1{,}395{,}268{,}521 background
+cells drawn in the category colour of the block that the game holds there, and one that was not:
+in one recording a coin that the player had just collected stayed on screen for 368 frames. The
+original ROM shows it on the same frames, because the game's first graphics buffer overflows
+into the second one, which held the instruction to erase the coin. All 113{,}349{,}784 sprites
+were in the colour of their object's category, and no rendered pixel was outside the legend.
+Mario's rectangle was exactly his live collision box in 97.2\,\% of his frames. The
+rectangles of the Goomba, the Cheep-cheeps, the Bloober, the Spiny and its egg, both kinds of
+Bullet Bill, the Paratroopas, the hammer, the fireball, the 1-up mushroom, the fire flower and
+the star were exactly their boxes in all of their frames, and those of the Piranha Plant and of
+the super mushroom in all but 242, in which a hammer in flight had taken two of their
+sprite slots, as it does in the original game; the other cases are the residuals of
+Section~\ref{sec:verification}. The sound audit of the same recordings found the expected
+pitch, duty and volume for the 159{,}805 cues that started, and no cue cut short or silenced by
+the music handler: in particular, all 99 bricks broken under star power
+sounded in full. Outside cues and tunes, the only sound was a tone left over for one frame after
+an area change or at the start of a recording (153 times). Of the 8046 death
+tones, 7999 sounded in full, 43 were shortened by the sound of a
+Bullet Bill being fired while they played, and 4 were cut by the end of the
+recording.
 
 \subsection{Visual statistics}
 
